@@ -2258,6 +2258,11 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 </body>
 </html>`;
 
+// Lightweight health-check endpoint for cron jobs
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 app.get('*', (req, res) => {
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
   res.send(HTML_DOCUMENT);
