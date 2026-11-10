@@ -4,12 +4,18 @@ const { WebSocketServer } = require('ws');
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 * 1024 });
+
+// High-throughput WebSocket configuration (128MB payload ceiling, perMessageDeflate disabled for raw binary speed)
+const wss = new WebSocketServer({
+  server,
+  maxPayload: 128 * 1024 * 1024,
+  perMessageDeflate: false
+});
 
 const PORT = process.env.PORT || 3000;
 
 // Zero-log volatile memory structures
-const peers = new Map();          // peerId -> { ws, peerId, ipGroup, name, os, deviceType }
+const peers = new Map();          // peerId -> { ws, peerId, ipGroup, name, os, deviceType, activeSessionId }
 const sessions = new Map();       // sessionId -> { sessionId, code4, senderId, senderWs, receivers: Map(peerId -> ws), files, totalSize }
 const codeToSession = new Map();  // 4-digit code -> sessionId
 
@@ -56,19 +62,23 @@ function broadcastRadarToIpGroup(ipGroup) {
 }
 
 wss.on('connection', (ws, req) => {
+  if (ws._socket && typeof ws._socket.setNoDelay === 'function') {
+    ws._socket.setNoDelay(true); // Disable Nagle's algorithm for instant packet dispatch
+  }
+
   const ipGroup = getClientIpGroup(req);
   let myPeerId = null;
   let boundSessionId = null;
   let boundRole = null;
 
   ws.on('message', (rawMessage, isBinary) => {
-    // Binary chunk relay for Turbo Relay fallback (supports multi-receiver broadcast)
+    // High-Speed Binary Chunk Relay for Turbo Relay mode (multi-receiver broadcast capable)
     if (isBinary) {
       if (boundSessionId && sessions.has(boundSessionId)) {
         const sess = sessions.get(boundSessionId);
         if (boundRole === 'sender') {
           sess.receivers.forEach((rWs) => {
-            if (rWs && rWs.readyState === ws.OPEN) {
+            if (rWs && rWs.readyState === ws.OPEN && rWs.bufferedAmount < 32 * 1024 * 1024) {
               rWs.send(rawMessage, { binary: true });
             }
           });
@@ -154,7 +164,6 @@ wss.on('connection', (ws, req) => {
         const sess = sessions.get(boundSessionId);
         sess.files = data.files || [];
         sess.totalSize = data.totalSize || 0;
-        // Notify any currently previewing receivers
         sess.receivers.forEach((rWs) => {
           if (rWs.readyState === ws.OPEN) {
             rWs.send(JSON.stringify({
@@ -197,7 +206,7 @@ wss.on('connection', (ws, req) => {
       }
     }
 
-    // 5. Receiver joins a session to preview files (Broadcast-ready)
+    // 5. Receiver joins a session to preview files
     else if (data.type === 'join-session') {
       const sess = sessions.get(data.sessionId);
       if (!sess || !sess.senderWs || sess.senderWs.readyState !== ws.OPEN) {
@@ -288,7 +297,7 @@ wss.on('connection', (ws, req) => {
       }
     }
 
-    // 9. Instant P2P Text & Link Scratchpad Sync (Syncs across Session Peers + Same-Wi-Fi Group)
+    // 9. Instant P2P Text & Link Scratchpad Sync
     else if (data.type === 'scratchpad-update') {
       peers.forEach((p) => {
         if (p.peerId !== myPeerId && p.ipGroup === ipGroup && p.ws.readyState === ws.OPEN) {
@@ -345,11 +354,129 @@ wss.on('connection', (ws, req) => {
   });
 });
 
+// ==========================================================
+// PWA ASSETS: MANIFEST.JSON, SERVICE WORKER (/sw.js) & ICONS
+// ==========================================================
+const APP_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#030712"/>
+    </linearGradient>
+    <linearGradient id="bolt" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24"/>
+      <stop offset="50%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#10b981"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="115" fill="url(#bg)" stroke="#f59e0b" stroke-width="12"/>
+  <circle cx="256" cy="256" r="190" fill="none" stroke="#1f2937" stroke-width="6" stroke-dasharray="18 12"/>
+  <circle cx="256" cy="256" r="135" fill="none" stroke="#374151" stroke-width="4"/>
+  <path d="M285 96L144 276h102l-19 140 141-180H266L285 96z" fill="url(#bolt)"/>
+</svg>`;
+
+app.get('/icon-192.svg', (req, res) => {
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(APP_ICON_SVG);
+});
+
+app.get('/icon-512.svg', (req, res) => {
+  res.setHeader('Content-Type', 'image/svg+xml');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(APP_ICON_SVG);
+});
+
+app.get('/manifest.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/manifest+json');
+  res.send(JSON.stringify({
+    id: '/',
+    name: 'ChocoBento P2P — Hyper-Speed File Transfer',
+    short_name: 'ChocoBento',
+    description: 'Zero-Log, Direct Peer-to-Peer File & Folder Sharing Command Center',
+    start_url: '/',
+    scope: '/',
+    display: 'standalone',
+    display_override: ['window-controls-overlay', 'standalone'],
+    orientation: 'any',
+    background_color: '#090b10',
+    theme_color: '#090b10',
+    categories: ['utilities', 'productivity'],
+    icons: [
+      {
+        src: '/icon-192.svg',
+        sizes: '192x192',
+        type: 'image/svg+xml',
+        purpose: 'any'
+      },
+      {
+        src: '/icon-512.svg',
+        sizes: '512x512',
+        type: 'image/svg+xml',
+        purpose: 'any maskable'
+      }
+    ]
+  }));
+});
+
+const SERVICE_WORKER_JS = `
+const CACHE_NAME = 'chocobento-pwa-v3';
+const PRECACHE_URLS = ['/', '/manifest.json', '/icon-192.svg', '/icon-512.svg'];
+
+self.addEventListener('install', (event) => {
+  self.skipWaiting();
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS).catch(() => {}))
+  );
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(
+      keys.map((k) => (k !== CACHE_NAME ? caches.delete(k) : Promise.resolve()))
+    )).then(() => self.clients.claim())
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  if (event.request.method !== 'GET') return;
+  event.respondWith(
+    fetch(event.request)
+      .then((networkResp) => {
+        if (networkResp && networkResp.status === 200 && event.request.url.startsWith(self.location.origin)) {
+          const copy = networkResp.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy)).catch(() => {});
+        }
+        return networkResp;
+      })
+      .catch(() => caches.match(event.request).then((cached) => cached || caches.match('/')))
+  );
+});
+`;
+
+app.get('/sw.js', (req, res) => {
+  res.setHeader('Content-Type', 'application/javascript');
+  res.setHeader('Service-Worker-Allowed', '/');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.send(SERVICE_WORKER_JS);
+});
+
+// ==========================================================
+// MAIN APPLICATION UI (ADAPTIVE LAPTOP & SMARTPHONE + PWA)
+// ==========================================================
 const HTML_DOCUMENT = `<!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover">
+  <meta name="theme-color" content="#090b10">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="ChocoBento">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/icon-192.svg">
+  <link rel="apple-touch-icon" href="/icon-192.svg">
   <title>ChocoBento P2P — Command Center</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
@@ -392,11 +519,18 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       background: radial-gradient(circle at 50% 0%, #2d0a0f 0%, #090b10 70%);
     }
 
+    * {
+      -webkit-tap-highlight-color: transparent;
+      box-sizing: border-box;
+    }
+
     body {
       font-family: 'Plus Jakarta Sans', sans-serif;
       color: #f3f4f6;
       min-height: 100vh;
+      min-height: 100dvh;
       transition: background 0.5s ease;
+      overflow-x: hidden;
     }
 
     .mono-font {
@@ -404,21 +538,30 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     }
 
     .bento-card {
-      background: linear-gradient(155deg, rgba(24, 31, 44, 0.86) 0%, rgba(12, 16, 24, 0.94) 100%);
+      background: linear-gradient(155deg, rgba(24, 31, 44, 0.88) 0%, rgba(12, 16, 24, 0.95) 100%);
       backdrop-filter: blur(20px);
       border: 1px solid var(--state-border);
       box-shadow: 0 20px 45px -15px var(--state-shadow), 0 0 25px -8px var(--accent-glow);
-      transition: border-color 0.35s ease, box-shadow 0.35s ease, transform 0.2s ease;
+      transition: border-color 0.35s ease, box-shadow 0.35s ease;
     }
 
     .accent-text { color: var(--accent-main); }
     .accent-bg { background-color: var(--accent-main); }
     .accent-border { border-color: var(--accent-main); }
 
+    /* Touch-friendly ergonomic button sizing for smartphones */
+    .touch-btn {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+    }
+
     /* Sonar Radar Animation */
     .radar-sweep {
       background: conic-gradient(from 0deg, transparent 70%, var(--accent-glow) 95%, var(--accent-main) 100%);
-      animation: spinRadar 4s linear infinite;
+      animation: spinRadar 3.5s linear infinite;
     }
     @keyframes spinRadar {
       from { transform: rotate(0deg); }
@@ -427,122 +570,137 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
     .maximized-card {
       position: fixed !important;
-      inset: 1.5rem !important;
-      z-index: 60 !important;
+      inset: 0.75rem !important;
+      z-index: 70 !important;
       display: flex !important;
       flex-direction: column !important;
+    }
+
+    /* Prevent iOS/Android auto-zoom on input focus */
+    @media (max-width: 768px) {
+      input, textarea, select {
+        font-size: 16px !important;
+      }
     }
 
     .custom-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
     .custom-scroll::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.3); border-radius: 9999px; }
   </style>
 </head>
-<body data-state="idle" data-accent="amber" class="p-3 sm:p-5 lg:p-6 flex flex-col justify-between">
+<body data-state="idle" data-accent="amber" class="p-2.5 sm:p-4 lg:p-6 pb-20 lg:pb-6 flex flex-col justify-between">
 
-  <!-- FLOATING PILL DOCK NAVIGATION -->
-  <header class="max-w-7xl w-full mx-auto mb-5 flex flex-wrap items-center justify-between gap-3 bg-gray-950/80 backdrop-blur-xl border border-gray-800/90 rounded-2xl px-4 py-2.5 shadow-2xl">
+  <!-- FLOATING PILL DOCK NAVIGATION (ADAPTIVE FOR SMARTPHONE & LAPTOP) -->
+  <header class="max-w-7xl w-full mx-auto mb-3.5 sm:mb-5 flex flex-wrap items-center justify-between gap-2 bg-gray-950/85 backdrop-blur-xl border border-gray-800/90 rounded-2xl px-3 sm:px-4 py-2.5 shadow-2xl sticky top-2 z-40">
     <!-- Brand & Ambient State Indicator -->
-    <div class="flex items-center space-x-3">
-      <div class="w-9 h-9 rounded-xl accent-bg text-gray-950 font-black flex items-center justify-center shadow-lg cursor-pointer" onclick="resetToCleanWorkspace()">
+    <div class="flex items-center space-x-2.5">
+      <div class="w-10 h-10 rounded-xl accent-bg text-gray-950 font-black flex items-center justify-center shadow-lg cursor-pointer text-lg flex-shrink-0" onclick="resetToCleanWorkspace()">
         ⚡
       </div>
       <div>
         <div class="flex items-center space-x-2">
-          <span class="font-extrabold tracking-tight text-white text-base">Choco<span class="accent-text">Bento</span></span>
+          <span class="font-extrabold tracking-tight text-white text-base sm:text-lg">Choco<span class="accent-text">Bento</span></span>
           <span id="ambient-state-pill" class="text-[10px] mono-font uppercase font-bold px-2 py-0.5 rounded-md bg-gray-800 text-gray-300 border border-gray-700">IDLE • READY</span>
         </div>
-        <p class="text-[11px] text-gray-400 hidden sm:block">Zero-Log P2P Command Workspace • Ctrl+V Paste Active</p>
+        <p id="device-mode-label" class="text-[10px] sm:text-[11px] text-gray-400">Hyper-Speed P2P Command Center</p>
       </div>
     </div>
 
     <!-- Center Pill Controls: Wake-Lock + Broadcast Status -->
-    <div class="flex items-center space-x-2 text-xs">
-      <div id="wakelock-pill" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-gray-900 border border-gray-800 text-gray-400" title="Prevents phone/laptop from sleeping during transfers">
+    <div class="hidden xl:flex items-center space-x-2 text-xs">
+      <div id="wakelock-pill" class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-gray-900 border border-gray-800 text-gray-400">
         <span>☀️</span>
         <span id="wakelock-text" class="text-[11px] font-semibold">Wake-Lock: Standby</span>
       </div>
-      <div class="hidden md:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-gray-900 border border-gray-800 text-emerald-400">
+      <div class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-gray-900 border border-gray-800 text-emerald-400">
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
-        <span class="text-[11px] font-semibold">Broadcast P2P Online</span>
+        <span class="text-[11px] font-semibold">Hyper-Stream 256KB Engine</span>
       </div>
     </div>
 
-    <!-- Right Controls: Theme Accent Switcher & Scanner Trigger -->
-    <div class="flex items-center space-x-2">
-      <div class="flex items-center space-x-1.5 bg-gray-900 px-2.5 py-1.5 rounded-xl border border-gray-800" title="Switch Metallic Neon Accent">
-        <button onclick="setAccent('amber')" class="w-4 h-4 rounded-full bg-amber-500 hover:scale-125 transition-transform"></button>
-        <button onclick="setAccent('emerald')" class="w-4 h-4 rounded-full bg-emerald-500 hover:scale-125 transition-transform"></button>
-        <button onclick="setAccent('cyan')" class="w-4 h-4 rounded-full bg-cyan-500 hover:scale-125 transition-transform"></button>
-        <button onclick="setAccent('crimson')" class="w-4 h-4 rounded-full bg-rose-500 hover:scale-125 transition-transform"></button>
+    <!-- Right Controls: Install App Button, Theme Accent Switcher & QR Scanner -->
+    <div class="flex items-center space-x-1.5 sm:space-x-2">
+      <!-- Dedicated PWA Install App Button (Appears automatically when installable or gives instructions) -->
+      <button id="pwa-install-btn" onclick="triggerPwaInstall()" class="hidden touch-btn px-3 py-1.5 rounded-xl accent-bg text-gray-950 font-extrabold text-xs shadow-lg flex items-center space-x-1.5 transition-all">
+        <span>📲</span>
+        <span>Install App</span>
+      </button>
+
+      <div class="flex items-center space-x-1.5 bg-gray-900 px-2.5 py-2 rounded-xl border border-gray-800" title="Switch Metallic Neon Accent">
+        <button onclick="setAccent('amber')" aria-label="Amber Theme" class="w-4 h-4 sm:w-4 sm:h-4 rounded-full bg-amber-500 hover:scale-125 transition-transform"></button>
+        <button onclick="setAccent('emerald')" aria-label="Emerald Theme" class="w-4 h-4 sm:w-4 sm:h-4 rounded-full bg-emerald-500 hover:scale-125 transition-transform"></button>
+        <button onclick="setAccent('cyan')" aria-label="Cyan Theme" class="w-4 h-4 sm:w-4 sm:h-4 rounded-full bg-cyan-500 hover:scale-125 transition-transform"></button>
+        <button onclick="setAccent('crimson')" aria-label="Crimson Theme" class="w-4 h-4 sm:w-4 sm:h-4 rounded-full bg-rose-500 hover:scale-125 transition-transform"></button>
       </div>
-      <button onclick="openQrCameraModal()" class="px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-xs font-bold text-white flex items-center space-x-1.5 transition-all">
-        <span>📷</span>
+
+      <button onclick="openQrCameraModal()" class="touch-btn px-3 sm:px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-xs font-bold text-white flex items-center space-x-1.5 transition-all">
+        <span class="text-base">📷</span>
         <span class="hidden sm:inline">Scan QR</span>
       </button>
     </div>
   </header>
 
-  <!-- PERSISTENT BENTO-GRID WORKSPACE (ALL 4 MODULES LIVE ON 1 SCREEN) -->
-  <main class="max-w-7xl w-full mx-auto flex-grow grid grid-cols-1 lg:grid-cols-12 gap-5">
+  <!-- PERSISTENT BENTO-GRID WORKSPACE (RESPONSIVE SMARTPHONE + LAPTOP LAYOUT) -->
+  <main class="max-w-7xl w-full mx-auto flex-grow grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
 
     <!-- ========================================================== -->
     <!-- LEFT COLUMN (7 COLS): TRANSFER HUB + CYBER-HUD TELEMETRY   -->
     <!-- ========================================================== -->
-    <div class="lg:col-span-7 flex flex-col gap-5">
+    <div class="lg:col-span-7 flex flex-col gap-4 sm:gap-5">
 
       <!-- BENTO MODULE 1: PRIMARY TRANSFER COMMAND HUB -->
-      <div class="bento-card rounded-3xl p-5 sm:p-6 flex-grow flex flex-col justify-between relative overflow-hidden">
+      <div id="section-transfer-hub" class="bento-card rounded-3xl p-4 sm:p-6 flex-grow flex flex-col justify-between relative overflow-hidden">
 
-        <!-- VIEW 1A: IDLE DROPZONE (SUPPORTS FILES, FOLDERS & CTRL+V PASTE) -->
+        <!-- VIEW 1A: IDLE DROPZONE (ADAPTIVE FOR TOUCH SMARTPHONES & LAPTOP DRAG-DROP) -->
         <div id="hub-idle" class="my-auto space-y-4">
           <div id="bento-dropzone"
                onclick="document.getElementById('file-input').click()"
-               class="border-2 border-dashed border-gray-700 hover:border-amber-400 rounded-2xl p-6 sm:p-8 text-center cursor-pointer transition-all bg-gray-950/50 hover:bg-gray-900/70 group">
+               class="border-2 border-dashed border-gray-700 hover:border-amber-400 active:border-amber-400 rounded-2xl p-5 sm:p-8 text-center cursor-pointer transition-all bg-gray-950/50 hover:bg-gray-900/70 group">
             <input type="file" id="file-input" multiple class="hidden" onchange="handleFilesPicked(this.files)">
             <input type="file" id="folder-input" webkitdirectory directory multiple class="hidden" onchange="handleFilesPicked(this.files)">
 
-            <div class="w-16 h-16 mx-auto rounded-2xl bg-gray-900 border border-gray-700 flex items-center justify-center text-3xl group-hover:scale-110 transition-transform shadow-inner">
+            <div class="w-16 h-16 sm:w-20 sm:h-20 mx-auto rounded-2xl bg-gray-900 border border-gray-700 flex items-center justify-center text-3xl sm:text-4xl group-hover:scale-110 transition-transform shadow-inner">
               🚀
             </div>
-            <h2 class="mt-4 text-lg sm:text-xl font-extrabold text-white">Drop files or entire folders here to start sharing</h2>
-            <p class="mt-1 text-xs text-gray-400">Or press <kbd class="px-1.5 py-0.5 rounded bg-gray-800 text-amber-400 mono-font">Ctrl + V</kbd> anywhere to paste screenshots & clipboard files</p>
+            <h2 id="dropzone-headline" class="mt-3.5 text-base sm:text-xl font-extrabold text-white">Tap to select files or drop folders here</h2>
+            <p class="mt-1 text-xs text-gray-400">Supports unlimited file sizes • <kbd class="px-1.5 py-0.5 rounded bg-gray-800 text-amber-400 mono-font">Ctrl + V</kbd> clipboard paste ready</p>
 
-            <div class="mt-5 flex flex-wrap items-center justify-center gap-3" onclick="event.stopPropagation()">
-              <button onclick="document.getElementById('file-input').click()" class="px-4 py-2.5 rounded-xl accent-bg text-gray-950 font-extrabold text-xs shadow-lg hover:opacity-90 transition-all">
+            <!-- Touch-Friendly Action Buttons (Full-width stack on phones, inline on laptops) -->
+            <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-md mx-auto" onclick="event.stopPropagation()">
+              <button onclick="document.getElementById('file-input').click()" class="touch-btn w-full px-4 py-3 rounded-xl accent-bg text-gray-950 font-extrabold text-xs sm:text-sm shadow-lg hover:opacity-90 active:scale-98 transition-all">
                 + Select File(s)
               </button>
-              <button onclick="document.getElementById('folder-input').click()" class="px-4 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white font-bold text-xs transition-all">
+              <button onclick="document.getElementById('folder-input').click()" class="touch-btn w-full px-4 py-3 rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white font-bold text-xs sm:text-sm active:scale-98 transition-all">
                 📁 Select Whole Folder
               </button>
             </div>
           </div>
 
-          <div class="grid grid-cols-3 gap-2.5 text-center text-[11px] text-gray-400">
-            <div class="bg-gray-950/60 py-2 px-2 rounded-xl border border-gray-800/80">♾️ Unlimited Size</div>
-            <div class="bg-gray-950/60 py-2 px-2 rounded-xl border border-gray-800/80">📡 Broadcast Multi-Peer</div>
-            <div class="bg-gray-950/60 py-2 px-2 rounded-xl border border-gray-800/80">🛡️ CRC32 Verified</div>
+          <div class="grid grid-cols-3 gap-2 text-center text-[10px] sm:text-[11px] text-gray-400">
+            <div class="bg-gray-950/60 py-2.5 px-2 rounded-xl border border-gray-800/80 font-semibold">⚡ Max-Speed Stream</div>
+            <div class="bg-gray-950/60 py-2.5 px-2 rounded-xl border border-gray-800/80 font-semibold">📡 Multi-Receiver</div>
+            <div class="bg-gray-950/60 py-2.5 px-2 rounded-xl border border-gray-800/80 font-semibold">🛡️ CRC32 Verified</div>
           </div>
         </div>
 
         <!-- VIEW 1B: SENDER BROADCAST HUB (QR + 4-DIGIT CODE + OPTIONAL .ZIP BUNDLER) -->
         <div id="hub-sender-ready" class="hidden space-y-4 my-auto">
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
-            <div>
-              <div class="flex items-center space-x-2">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-1.5">
                 <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30">Broadcast Active</span>
                 <span id="sender-peer-counter" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-cyan-500/20 text-cyan-300 border border-cyan-500/30">0 Receivers Connected</span>
               </div>
-              <h3 id="sender-title" class="text-base font-extrabold text-white mt-1 truncate max-w-xs sm:max-w-md">Ready</h3>
+              <h3 id="sender-title" class="text-sm sm:text-base font-extrabold text-white mt-1 truncate">Ready</h3>
               <p id="sender-subtitle" class="text-xs text-gray-400 mono-font">0 MB</p>
             </div>
 
-            <div class="flex items-center space-x-2">
-              <!-- OPTIONAL 1-CLICK .ZIP BUNDLER BUTTON (SHOWN WHEN >1 FILES ARE SELECTED) -->
-              <button id="zip-bundle-btn" onclick="bundleSelectedFilesIntoZip()" class="hidden px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-all">
-                📦 Bundle all into single .ZIP
+            <div class="flex flex-wrap items-center gap-2">
+              <!-- OPTIONAL 1-CLICK .ZIP BUNDLER BUTTON -->
+              <button id="zip-bundle-btn" onclick="bundleSelectedFilesIntoZip()" class="hidden touch-btn px-3 py-2 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition-all">
+                📦 Bundle all into .ZIP
               </button>
-              <button onclick="resetToCleanWorkspace()" class="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 text-xs font-bold transition-all">
-                ✕ New / Reset
+              <button onclick="resetToCleanWorkspace()" class="touch-btn px-3 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-300 text-xs font-bold transition-all">
+                ✕ Reset
               </button>
             </div>
           </div>
@@ -553,29 +711,34 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           <!-- QR Code + 4-Digit Code + Link Grid -->
           <div class="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center bg-gray-950/60 p-3.5 rounded-2xl border border-gray-800">
             <div class="sm:col-span-5 flex flex-col items-center justify-center">
-              <div class="bg-white p-2 rounded-xl shadow-lg border-2 border-amber-400 w-[156px] h-[156px] flex items-center justify-center">
-                <canvas id="sender-qr-canvas" width="140" height="140" class="w-[140px] h-[140px] block"></canvas>
-                <img id="sender-qr-fallback" alt="QR" class="w-[140px] h-[140px] hidden" />
+              <div class="bg-white p-2.5 rounded-2xl shadow-lg border-2 border-amber-400 w-[168px] h-[168px] flex items-center justify-center">
+                <canvas id="sender-qr-canvas" width="148" height="148" class="w-[148px] h-[148px] block"></canvas>
+                <img id="sender-qr-fallback" alt="QR" class="w-[148px] h-[148px] hidden" />
               </div>
-              <span class="text-[10px] text-gray-400 mt-1.5">Active while this tab stays open</span>
+              <span class="text-[10px] text-gray-400 mt-1.5">Active while this screen stays open</span>
             </div>
 
-            <div class="sm:col-span-7 space-y-3">
+            <div class="sm:col-span-7 space-y-3 w-full">
               <div class="flex items-center justify-between bg-gray-900/90 px-3.5 py-2.5 rounded-xl border border-gray-800">
                 <div>
                   <p class="text-[10px] uppercase font-bold text-gray-400">4-Digit Nearby Code</p>
-                  <p class="text-[11px] text-gray-500">Or click a device on Sonar Radar →</p>
+                  <p class="text-[11px] text-gray-500">Or tap device on Sonar Radar</p>
                 </div>
-                <span id="sender-code4" class="text-2xl font-black tracking-[0.2em] accent-text mono-font">----</span>
+                <span id="sender-code4" class="text-2xl sm:text-3xl font-black tracking-[0.2em] accent-text mono-font">----</span>
               </div>
 
-              <div class="space-y-1">
-                <label class="text-[11px] font-semibold text-gray-400">Direct Broadcast Link (Multiple users can download):</label>
-                <div class="flex space-x-2">
-                  <input type="text" id="sender-link-input" readonly class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2 text-xs text-gray-200 mono-font focus:outline-none">
-                  <button onclick="copyBroadcastLink()" id="copy-link-btn" class="px-3.5 py-2 rounded-xl accent-bg text-gray-950 font-extrabold text-xs whitespace-nowrap">
-                    Copy
-                  </button>
+              <div class="space-y-1.5">
+                <label class="text-[11px] font-semibold text-gray-400">Direct Share Link (Multi-User Broadcast):</label>
+                <div class="flex flex-col sm:flex-row gap-2">
+                  <input type="text" id="sender-link-input" readonly class="w-full bg-gray-900 border border-gray-700 rounded-xl px-3 py-2.5 text-xs text-gray-200 mono-font focus:outline-none">
+                  <div class="flex gap-2">
+                    <button onclick="copyBroadcastLink()" id="copy-link-btn" class="touch-btn flex-1 sm:flex-none px-4 py-2.5 rounded-xl accent-bg text-gray-950 font-extrabold text-xs whitespace-nowrap">
+                      Copy Link
+                    </button>
+                    <button onclick="nativeShareBroadcastLink()" id="native-share-btn" class="hidden touch-btn px-3.5 py-2.5 rounded-xl bg-gray-800 hover:bg-gray-700 border border-gray-600 text-white font-bold text-xs whitespace-nowrap">
+                      📤 Share
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -585,21 +748,21 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         <!-- VIEW 1C: RECEIVER PREVIEW (SHOWS FILE NAME, SIZE & DOWNLOAD BUTTON BEFORE STREAMING) -->
         <div id="hub-receiver-preview" class="hidden my-auto space-y-5 text-center py-3">
           <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-bold">
-            <span>📥 Incoming Direct P2P File Transfer</span>
+            <span>📥 Incoming High-Speed P2P Transfer</span>
           </div>
 
           <div>
-            <h3 id="receiver-title" class="text-xl font-extrabold text-white break-all">Loading file metadata...</h3>
+            <h3 id="receiver-title" class="text-lg sm:text-xl font-extrabold text-white break-all px-2">Loading file metadata...</h3>
             <p id="receiver-subtitle" class="text-sm accent-text font-bold mono-font mt-1">0 MB</p>
           </div>
 
-          <div id="receiver-file-list" class="max-h-32 overflow-y-auto custom-scroll text-left bg-gray-950/80 p-3 rounded-xl border border-gray-800 space-y-1.5 text-xs"></div>
+          <div id="receiver-file-list" class="max-h-36 overflow-y-auto custom-scroll text-left bg-gray-950/80 p-3 rounded-xl border border-gray-800 space-y-1.5 text-xs"></div>
 
-          <div class="flex flex-col sm:flex-row gap-3">
-            <button onclick="startReceiverDownload()" class="flex-grow py-3.5 px-6 rounded-2xl accent-bg text-gray-950 font-black text-sm shadow-xl hover:opacity-95 transition-all flex items-center justify-center space-x-2">
-              <span>⬇️ Download File(s) Now</span>
+          <div class="flex flex-col sm:flex-row gap-3 pt-1">
+            <button onclick="startReceiverDownload()" class="touch-btn flex-grow py-4 px-6 rounded-2xl accent-bg text-gray-950 font-black text-sm sm:text-base shadow-xl hover:opacity-95 active:scale-98 transition-all flex items-center justify-center space-x-2">
+              <span>⬇️ Download File(s) at Max Speed</span>
             </button>
-            <button onclick="resetToCleanWorkspace()" class="py-3.5 px-4 rounded-2xl bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-xs">
+            <button onclick="resetToCleanWorkspace()" class="touch-btn py-3.5 px-5 rounded-2xl bg-gray-800 hover:bg-gray-700 text-gray-300 font-bold text-xs">
               Cancel
             </button>
           </div>
@@ -607,22 +770,22 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
         <!-- VIEW 1D: ACTIVE TRANSFER PROGRESS HUD (SHOWN ON BOTH SENDER & RECEIVER) -->
         <div id="hub-active-transfer" class="hidden my-auto space-y-4">
-          <div class="flex items-center justify-between border-b border-gray-800 pb-3">
-            <div>
-              <div class="flex items-center space-x-2">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
+            <div class="min-w-0 flex-1">
+              <div class="flex flex-wrap items-center gap-1.5">
                 <span id="active-role-badge" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300">STREAMING</span>
                 <span id="integrity-badge" class="hidden px-2.5 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/30 text-emerald-200 border border-emerald-400/50">
-                  🛡️ 100% Integrity Verified — Zero Corruption
+                  🛡️ 100% Integrity Verified
                 </span>
               </div>
-              <h3 id="active-filename" class="text-sm sm:text-base font-bold text-white truncate max-w-xs sm:max-w-md mt-1">file.bin</h3>
+              <h3 id="active-filename" class="text-sm sm:text-base font-bold text-white truncate mt-1">file.bin</h3>
             </div>
 
-            <div class="flex items-center space-x-2">
-              <button id="back-to-qr-btn" onclick="returnSenderToQrView()" class="hidden px-3 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-amber-300 text-xs font-bold">
-                QR / Broadcast
+            <div class="flex items-center gap-2">
+              <button id="back-to-qr-btn" onclick="returnSenderToQrView()" class="hidden touch-btn px-3 py-2 rounded-xl bg-gray-800 hover:bg-gray-700 text-amber-300 text-xs font-bold">
+                QR / Link
               </button>
-              <button onclick="triggerStopAndRestart()" class="px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold shadow-lg transition-all">
+              <button onclick="triggerStopAndRestart()" class="touch-btn px-3.5 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold shadow-lg transition-all">
                 Stop & Restart
               </button>
             </div>
@@ -631,11 +794,11 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           <!-- Progress Bar & Percentage -->
           <div class="space-y-2">
             <div class="flex justify-between items-end">
-              <span id="active-status-text" class="text-xs text-gray-300 font-medium">Streaming encrypted chunks...</span>
-              <span id="active-percent-text" class="text-3xl font-black accent-text mono-font">0%</span>
+              <span id="active-status-text" class="text-xs text-gray-300 font-medium">Pumping unthrottled binary frames...</span>
+              <span id="active-percent-text" class="text-3xl sm:text-4xl font-black accent-text mono-font">0%</span>
             </div>
-            <div class="w-full h-4 bg-gray-950 rounded-full overflow-hidden border border-gray-800 p-0.5">
-              <div id="active-progress-fill" class="h-full rounded-full bg-gradient-to-r from-amber-500 via-emerald-400 to-cyan-400 transition-all duration-150" style="width: 0%"></div>
+            <div class="w-full h-4 sm:h-5 bg-gray-950 rounded-full overflow-hidden border border-gray-800 p-0.5">
+              <div id="active-progress-fill" class="h-full rounded-full bg-gradient-to-r from-amber-500 via-emerald-400 to-cyan-400 transition-all duration-75" style="width: 0%"></div>
             </div>
             <div class="flex justify-between text-[11px] text-gray-400 mono-font">
               <span id="active-bytes-counter">0.00 MB / 0.00 MB</span>
@@ -644,18 +807,18 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           </div>
 
           <!-- Speed, ETA, Checksum Row -->
-          <div class="grid grid-cols-3 gap-3 text-center">
-            <div class="bg-gray-950/75 p-2.5 rounded-xl border border-gray-800">
+          <div class="grid grid-cols-3 gap-2.5 sm:gap-3 text-center">
+            <div class="bg-gray-950/75 p-2.5 sm:p-3 rounded-xl border border-gray-800">
               <p class="text-[10px] uppercase text-gray-400">Live Speed</p>
               <p id="hud-speed" class="text-sm sm:text-base font-extrabold text-emerald-400 mono-font mt-0.5">0.00 MB/s</p>
             </div>
-            <div class="bg-gray-950/75 p-2.5 rounded-xl border border-gray-800">
+            <div class="bg-gray-950/75 p-2.5 sm:p-3 rounded-xl border border-gray-800">
               <p class="text-[10px] uppercase text-gray-400">ETA Remaining</p>
               <p id="hud-eta" class="text-sm sm:text-base font-extrabold text-white mono-font mt-0.5">-- s</p>
             </div>
-            <div class="bg-gray-950/75 p-2.5 rounded-xl border border-gray-800">
+            <div class="bg-gray-950/75 p-2.5 sm:p-3 rounded-xl border border-gray-800">
               <p class="text-[10px] uppercase text-gray-400">CRC32 Hash</p>
-              <p id="hud-crc" class="text-sm sm:text-base font-extrabold text-cyan-400 mono-font mt-0.5">0x000000</p>
+              <p id="hud-crc" class="text-xs sm:text-base font-extrabold text-cyan-400 mono-font mt-0.5 truncate">0x00000000</p>
             </div>
           </div>
         </div>
@@ -663,43 +826,43 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       </div>
 
       <!-- BENTO MODULE 2: CYBER-HUD TELEMETRY & THROUGHPUT GRAPH -->
-      <div id="telemetry-bento-card" class="bento-card rounded-3xl p-5 space-y-3">
+      <div id="telemetry-bento-card" class="bento-card rounded-3xl p-4 sm:p-5 space-y-3">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2">
             <span class="text-sm">📊</span>
             <h3 class="text-xs font-extrabold uppercase tracking-wider text-gray-200">Cyber-HUD Network Telemetry</h3>
           </div>
           <div class="flex items-center space-x-2">
-            <span id="hud-protocol-badge" class="px-2 py-0.5 rounded text-[10px] mono-font font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">WebRTC DTLS 1.3</span>
-            <button onclick="toggleMaximizeCard('telemetry-bento-card')" class="px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-gray-300" title="Maximize / Focus Card">
+            <span id="hud-protocol-badge" class="px-2 py-0.5 rounded text-[10px] mono-font font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">Hyper-Stream P2P</span>
+            <button onclick="toggleMaximizeCard('telemetry-bento-card')" class="px-2.5 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-gray-300">
               ⛶ Focus
             </button>
           </div>
         </div>
 
         <!-- 4 Cyber-HUD Telemetry Pills -->
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-center mono-font">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center mono-font">
           <div class="bg-gray-950/80 p-2 rounded-xl border border-gray-800/90">
             <span class="text-[10px] text-gray-400 block">PING LATENCY</span>
-            <span id="telemetry-ping" class="text-xs font-bold text-emerald-400">12 ms</span>
+            <span id="telemetry-ping" class="text-xs font-bold text-emerald-400">8 ms</span>
           </div>
           <div class="bg-gray-950/80 p-2 rounded-xl border border-gray-800/90">
-            <span class="text-[10px] text-gray-400 block">CHUNK ENGINE</span>
-            <span class="text-xs font-bold text-amber-400">64 KB / Frame</span>
+            <span class="text-[10px] text-gray-400 block">BUFFER PIPE</span>
+            <span id="telemetry-chunk-label" class="text-xs font-bold text-amber-400">128-256 KB</span>
           </div>
           <div class="bg-gray-950/80 p-2 rounded-xl border border-gray-800/90">
-            <span class="text-[10px] text-gray-400 block">PACKETS STREAMED</span>
+            <span class="text-[10px] text-gray-400 block">FRAMES PUMPED</span>
             <span id="telemetry-packets" class="text-xs font-bold text-cyan-400">0 pkts</span>
           </div>
           <div class="bg-gray-950/80 p-2 rounded-xl border border-gray-800/90">
-            <span class="text-[10px] text-gray-400 block">PEAK BANDWIDTH</span>
+            <span class="text-[10px] text-gray-400 block">PEAK SPEED</span>
             <span id="telemetry-peak" class="text-xs font-bold text-white">0.00 MB/s</span>
           </div>
         </div>
 
         <!-- Live Throughput Canvas -->
         <div class="bg-gray-950/90 p-2.5 rounded-2xl border border-gray-800 flex-grow">
-          <canvas id="telemetry-canvas" width="520" height="80" class="w-full h-[80px] block"></canvas>
+          <canvas id="telemetry-canvas" width="520" height="80" class="w-full h-[75px] sm:h-[85px] block"></canvas>
         </div>
       </div>
 
@@ -708,80 +871,79 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     <!-- ========================================================== -->
     <!-- RIGHT COLUMN (5 COLS): SONAR RADAR + P2P TEXT SCRATCHPAD   -->
     <!-- ========================================================== -->
-    <div class="lg:col-span-5 flex flex-col gap-5">
+    <div class="lg:col-span-5 flex flex-col gap-4 sm:gap-5">
 
       <!-- BENTO MODULE 3: AIRDROP-STYLE SONAR RADAR (SAME-WIFI AUTO-DISCOVERY) -->
-      <div class="bento-card rounded-3xl p-5 space-y-4">
-        <div class="flex items-center justify-between">
+      <div id="section-sonar-radar" class="bento-card rounded-3xl p-4 sm:p-5 space-y-3.5">
+        <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
             <div class="flex items-center space-x-2">
               <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-ping"></span>
-              <h3 class="text-xs font-extrabold uppercase tracking-wider text-gray-200">Sonar Radar • Same-Wi-Fi Auto-Discovery</h3>
+              <h3 class="text-xs font-extrabold uppercase tracking-wider text-gray-200">Sonar Radar • Same-Wi-Fi</h3>
             </div>
-            <p class="text-[11px] text-gray-400 mt-0.5">Click any discovered device node to beam files directly</p>
+            <p class="text-[11px] text-gray-400 mt-0.5">Tap any discovered device to beam files instantly</p>
           </div>
 
           <!-- Local Device Smart Identity Pill (Editable Nickname) -->
-          <button onclick="promptRenameDevice()" class="px-2.5 py-1 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-[11px] font-bold text-amber-300 flex items-center space-x-1" title="Click to rename your device">
+          <button onclick="promptRenameDevice()" class="touch-btn px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-[11px] font-bold text-amber-300 flex items-center space-x-1.5" title="Tap to rename your device">
             <span id="my-os-icon">💻</span>
-            <span id="my-device-name">My Device</span>
+            <span id="my-device-name" class="truncate max-w-[120px]">My Device</span>
             <span class="text-gray-500">✎</span>
           </button>
         </div>
 
         <!-- Interactive Concentric Sonar Radar Box -->
-        <div class="relative h-44 rounded-2xl bg-gray-950/90 border border-gray-800 overflow-hidden flex items-center justify-center">
-          <!-- Concentric Radar Rings -->
+        <div class="relative h-48 sm:h-44 rounded-2xl bg-gray-950/90 border border-gray-800 overflow-hidden flex items-center justify-center">
           <div class="w-40 h-40 rounded-full border border-gray-800/80 absolute"></div>
           <div class="w-28 h-28 rounded-full border border-gray-800/80 absolute"></div>
           <div class="w-14 h-14 rounded-full border border-gray-800/80 absolute"></div>
           <div class="w-44 h-44 rounded-full radar-sweep opacity-25 absolute pointer-events-none"></div>
 
           <!-- Center Self Node -->
-          <div class="z-10 w-9 h-9 rounded-full accent-bg text-gray-950 font-black flex items-center justify-center shadow-lg text-sm" title="You">
+          <div class="z-10 w-10 h-10 rounded-full accent-bg text-gray-950 font-black flex items-center justify-center shadow-lg text-xs" title="You">
             YOU
           </div>
 
           <!-- Dynamic Nearby Peer Nodes Container -->
           <div id="radar-nodes-layer" class="absolute inset-0"></div>
 
-          <div id="radar-empty-hint" class="absolute bottom-2 inset-x-0 text-center text-[11px] text-gray-500 pointer-events-none">
-            Open this site on another device on the same Wi-Fi to see it appear here
+          <div id="radar-empty-hint" class="absolute bottom-2 inset-x-2 text-center text-[11px] text-gray-500 pointer-events-none">
+            Open this app on your phone/PC on the same Wi-Fi for zero-click discovery
           </div>
         </div>
 
         <!-- 4-Digit Code Direct Input Bar -->
-        <div class="flex space-x-2">
-          <input type="text" id="radar-code-input" maxlength="4" placeholder="Enter 4-Digit Code"
-                 class="w-full bg-gray-950 border border-gray-700 focus:border-amber-400 rounded-xl px-3.5 py-2 text-xs font-bold tracking-widest text-center mono-font text-white focus:outline-none">
-          <button onclick="connectBy4DigitCode()" class="px-4 py-2 rounded-xl accent-bg text-gray-950 font-extrabold text-xs whitespace-nowrap">
-            Connect Code
+        <div class="flex gap-2">
+          <input type="text" id="radar-code-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="Enter 4-Digit Code"
+                 class="w-full bg-gray-950 border border-gray-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm font-bold tracking-widest text-center mono-font text-white focus:outline-none">
+          <button onclick="connectBy4DigitCode()" class="touch-btn px-5 py-2.5 rounded-xl accent-bg text-gray-950 font-extrabold text-xs sm:text-sm whitespace-nowrap shadow-md">
+            Connect
           </button>
         </div>
       </div>
 
       <!-- BENTO MODULE 4: INSTANT P2P TEXT & LINK SCRATCHPAD -->
-      <div id="scratchpad-bento-card" class="bento-card rounded-3xl p-5 flex-grow flex flex-col justify-between space-y-3">
+      <div id="scratchpad-bento-card" class="bento-card rounded-3xl p-4 sm:p-5 flex-grow flex flex-col justify-between space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center space-x-2">
             <span>⚡</span>
-            <h3 class="text-xs font-extrabold uppercase tracking-wider text-gray-200">Instant P2P Text & Code Scratchpad</h3>
+            <h3 class="text-xs font-extrabold uppercase tracking-wider text-gray-200">P2P Text & Code Scratchpad</h3>
           </div>
 
-          <div class="flex items-center space-x-1.5">
-            <button onclick="toggleScratchpadCodeMode()" id="code-fmt-btn" class="px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] mono-font font-bold text-cyan-300 border border-gray-700">
-              { } Code Mode
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button onclick="toggleScratchpadCodeMode()" id="code-fmt-btn" class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] mono-font font-bold text-cyan-300 border border-gray-700">
+              { } Code
             </button>
-            <button onclick="showScratchpadQr()" class="px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-amber-300 border border-gray-700">
+            <button onclick="showScratchpadQr()" class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-amber-300 border border-gray-700">
               QR
             </button>
-            <button onclick="copyScratchpadText()" id="scratch-copy-btn" class="px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-white border border-gray-700">
+            <button onclick="copyScratchpadText()" id="scratch-copy-btn" class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-white border border-gray-700">
               Copy
             </button>
-            <button onclick="clearScratchpadText()" class="px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-rose-300 border border-gray-700">
+            <button onclick="clearScratchpadText()" class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-rose-300 border border-gray-700">
               Clear
             </button>
-            <button onclick="toggleMaximizeCard('scratchpad-bento-card')" class="px-2 py-1 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-gray-300">
+            <button onclick="toggleMaximizeCard('scratchpad-bento-card')" class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-gray-300">
               ⛶
             </button>
           </div>
@@ -789,11 +951,11 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
         <textarea id="p2p-scratchpad"
                   oninput="onScratchpadInput(this.value)"
-                  placeholder="Type or paste URLs, OTPs, Wi-Fi passwords, or code snippets here... Syncs live with nearby & connected peers!"
-                  class="w-full flex-grow min-h-[120px] bg-gray-950/90 border border-gray-800 focus:border-amber-400 rounded-2xl p-3.5 text-xs text-gray-200 focus:outline-none resize-none custom-scroll"></textarea>
+                  placeholder="Type or paste URLs, OTPs, Wi-Fi passwords, or code snippets here... Syncs live with nearby & connected devices!"
+                  class="w-full flex-grow min-h-[120px] bg-gray-950/90 border border-gray-800 focus:border-amber-400 rounded-2xl p-3.5 text-xs sm:text-sm text-gray-200 focus:outline-none resize-none custom-scroll"></textarea>
 
         <div class="flex justify-between items-center text-[10px] text-gray-400">
-          <span id="scratchpad-sync-status">Live sync ready across same-Wi-Fi & active session</span>
+          <span id="scratchpad-sync-status">Live sync ready across same-Wi-Fi & session</span>
           <span id="scratchpad-char-count" class="mono-font">0 chars</span>
         </div>
       </div>
@@ -802,37 +964,64 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
   </main>
 
+  <!-- SMARTPHONE BOTTOM ERGONOMIC QUICK-JUMP BAR (VISIBLE ON MOBILE PHONES ONLY) -->
+  <nav class="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-gray-950/95 backdrop-blur-xl border-t border-gray-800 px-2 py-1.5 grid grid-cols-4 gap-1 text-[10px] font-bold text-gray-300">
+    <button onclick="scrollToMobileSection('section-transfer-hub')" class="touch-btn flex flex-col items-center justify-center rounded-xl hover:bg-gray-900 py-1 text-amber-400">
+      <span class="text-base">🚀</span>
+      <span>Transfer</span>
+    </button>
+    <button onclick="scrollToMobileSection('section-sonar-radar')" class="touch-btn flex flex-col items-center justify-center rounded-xl hover:bg-gray-900 py-1">
+      <span class="text-base">📡</span>
+      <span>Radar</span>
+    </button>
+    <button onclick="scrollToMobileSection('scratchpad-bento-card')" class="touch-btn flex flex-col items-center justify-center rounded-xl hover:bg-gray-900 py-1">
+      <span class="text-base">📝</span>
+      <span>Scratchpad</span>
+    </button>
+    <button onclick="triggerPwaInstall()" class="touch-btn flex flex-col items-center justify-center rounded-xl hover:bg-gray-900 py-1 text-emerald-400">
+      <span class="text-base">📲</span>
+      <span>Install App</span>
+    </button>
+  </nav>
+
   <!-- MODAL 1: CAMERA QR SCANNER -->
-  <div id="qr-camera-modal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-    <div class="bento-card rounded-3xl p-6 max-w-md w-full space-y-4 text-center">
+  <div id="qr-camera-modal" class="fixed inset-0 z-50 hidden bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
+    <div class="bento-card rounded-3xl p-5 sm:p-6 max-w-md w-full space-y-4 text-center">
       <div class="flex justify-between items-center">
         <h3 class="text-base font-extrabold text-white">📷 Scan Peer QR Code</h3>
-        <button onclick="closeQrCameraModal()" class="text-gray-400 hover:text-white text-xs font-bold">✕ Close</button>
+        <button onclick="closeQrCameraModal()" class="touch-btn px-3 text-gray-400 hover:text-white text-xs font-bold">✕ Close</button>
       </div>
       <div id="html5-qr-reader" class="w-full overflow-hidden rounded-2xl border border-gray-700 bg-black min-h-[240px]"></div>
-      <p class="text-xs text-gray-400">Point your camera at the QR code on the sender's screen.</p>
+      <p class="text-xs text-gray-400">Point your camera at the QR code on the other device.</p>
     </div>
   </div>
 
   <!-- MODAL 2: SCRATCHPAD INSTANT QR POPUP -->
-  <div id="scratchpad-qr-modal" class="fixed inset-0 z-50 hidden bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
+  <div id="scratchpad-qr-modal" class="fixed inset-0 z-50 hidden bg-black/85 backdrop-blur-md flex items-center justify-center p-4">
     <div class="bento-card rounded-3xl p-6 max-w-xs w-full space-y-4 text-center">
       <div class="flex justify-between items-center">
         <h3 class="text-sm font-extrabold text-white">Scratchpad Instant QR</h3>
-        <button onclick="document.getElementById('scratchpad-qr-modal').classList.add('hidden')" class="text-gray-400 hover:text-white text-xs font-bold">✕</button>
+        <button onclick="document.getElementById('scratchpad-qr-modal').classList.add('hidden')" class="touch-btn px-2 text-gray-400 hover:text-white text-xs font-bold">✕</button>
       </div>
       <div class="bg-white p-3 rounded-2xl mx-auto w-[196px] h-[196px] flex items-center justify-center">
         <canvas id="scratchpad-qr-canvas" width="176" height="176" class="w-[176px] h-[176px] block"></canvas>
       </div>
-      <p class="text-[11px] text-gray-400">Scan with your phone to grab the scratchpad text or URL immediately.</p>
+      <p class="text-[11px] text-gray-400">Scan with your phone to grab the scratchpad text or link immediately.</p>
     </div>
   </div>
 
   <!-- ========================================================== -->
-  <!-- CLIENT-SIDE ENGINE (ZERO-ERROR VANILLA JS)                 -->
+  <!-- CLIENT-SIDE HYPER-STREAM ENGINE + PWA INSTALLER            -->
   <!-- ========================================================== -->
   <script>
-    const CHUNK_SIZE = 64 * 1024;
+    // High-Speed Chunk Constants:
+    // 128KB for WebRTC DataChannel (safe across all Chromium/Firefox SCTP implementations)
+    // 256KB for Turbo WebSocket Binary Relay (maximum TCP frame saturation)
+    const WEBRTC_CHUNK_SIZE = 128 * 1024;
+    const RELAY_CHUNK_SIZE = 256 * 1024;
+    const WEBRTC_HIGH_WATER_MARK = 8 * 1024 * 1024;  // 8MB pipe buffer
+    const WEBRTC_LOW_WATER_MARK = 2 * 1024 * 1024;   // Resume immediately at 2MB
+
     let ws = null;
     let pc = null;
     let dataChannel = null;
@@ -860,6 +1049,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     let speedSamples = [];
     let senderAckBytes = 0;
     let rollingCrc = 0;
+    let lastUiRenderTime = 0;
 
     // Receiver Buffers
     let incomingFilesMeta = [];
@@ -869,12 +1059,55 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     let totalReceivedBytes = 0;
     let lastAckTimestamp = 0;
 
-    // Wake-Lock & QR Scanner
+    // Wake-Lock, QR Scanner & PWA Install Prompt
     let wakeLockSentinel = null;
     let qrScannerInstance = null;
+    let deferredPwaPrompt = null;
 
     // ------------------------------------------------------------
-    // 1. SMART DEVICE CODENAME & OS ICON DETECTION
+    // 0. STANDALONE PWA SERVICE WORKER & INSTALL PROMPT HANDLER
+    // ------------------------------------------------------------
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function() {
+        navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function() {});
+      });
+    }
+
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      deferredPwaPrompt = e;
+      const installBtn = document.getElementById('pwa-install-btn');
+      if (installBtn) installBtn.classList.remove('hidden');
+    });
+
+    window.addEventListener('appinstalled', function() {
+      deferredPwaPrompt = null;
+      const installBtn = document.getElementById('pwa-install-btn');
+      if (installBtn) installBtn.classList.add('hidden');
+    });
+
+    async function triggerPwaInstall() {
+      if (deferredPwaPrompt) {
+        deferredPwaPrompt.prompt();
+        await deferredPwaPrompt.userChoice;
+        deferredPwaPrompt = null;
+      } else {
+        const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
+        if (isStandalone) {
+          alert('ChocoBento is already installed and running as a standalone app!');
+        } else {
+          alert('To install ChocoBento as a standalone app: Tap the Chrome three-dot menu (⋮) at the top right and select "Install app".');
+        }
+      }
+    }
+
+    function scrollToMobileSection(id) {
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
+    // ------------------------------------------------------------
+    // 1. SMART DEVICE CODENAME & ADAPTIVE UI ERGONOMICS
     // ------------------------------------------------------------
     function detectSmartDeviceIdentity() {
       const ua = navigator.userAgent || '';
@@ -895,6 +1128,20 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
       document.getElementById('my-os-icon').innerText = icon;
       document.getElementById('my-device-name').innerText = finalName;
+
+      // Adapt UI copy & buttons specifically for Smartphone vs Laptop
+      const modeLabel = document.getElementById('device-mode-label');
+      const dropHeadline = document.getElementById('dropzone-headline');
+      const nativeShareBtn = document.getElementById('native-share-btn');
+
+      if (devType === 'mobile') {
+        if (modeLabel) modeLabel.innerText = icon + ' ' + os + ' Touch Mode • Standalone App Ready';
+        if (dropHeadline) dropHeadline.innerText = 'Tap below to pick photos, videos, or files';
+        if (nativeShareBtn && navigator.share) nativeShareBtn.classList.remove('hidden');
+      } else {
+        if (modeLabel) modeLabel.innerText = icon + ' ' + os + ' Workstation • Ctrl+V Paste Active';
+        if (dropHeadline) dropHeadline.innerText = 'Drop files or entire folders here to start sharing';
+      }
 
       return { name: finalName, os: os, icon: icon, deviceType: devType };
     }
@@ -936,8 +1183,10 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       if ('wakeLock' in navigator) {
         try {
           wakeLockSentinel = await navigator.wakeLock.request('screen');
-          document.getElementById('wakelock-text').innerText = 'Wake-Lock: Active';
-          document.getElementById('wakelock-pill').classList.add('text-amber-300');
+          const wlText = document.getElementById('wakelock-text');
+          const wlPill = document.getElementById('wakelock-pill');
+          if (wlText) wlText.innerText = 'Wake-Lock: Active';
+          if (wlPill) wlPill.classList.add('text-amber-300');
         } catch (err) {}
       }
     }
@@ -967,7 +1216,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       };
 
       ws.onclose = function() {
-        setTimeout(initSignaling, 2500);
+        setTimeout(initSignaling, 2000);
       };
 
       ws.onmessage = async function(event) {
@@ -1032,7 +1281,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         }
         else if (msg.type === 'switch-to-fallback') {
           usingFallbackRelay = true;
-          document.getElementById('hud-protocol-badge').innerText = 'Turbo Relay Stream';
+          document.getElementById('hud-protocol-badge').innerText = 'Turbo 256KB Relay';
         }
         else if (msg.type === 'file-header') {
           onFileHeaderReceived(msg);
@@ -1045,7 +1294,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         }
         else if (msg.type === 'progress-ack') {
           senderAckBytes = msg.receivedBytes;
-          updateTelemetryAndProgress(senderAckBytes, totalSelectedBytes);
+          updateTelemetryAndProgress(senderAckBytes, totalSelectedBytes, senderAckBytes >= totalSelectedBytes);
           if (senderAckBytes >= totalSelectedBytes && totalSelectedBytes > 0) {
             completeTransferSuccess('Broadcast Transfer 100% Verified!');
           }
@@ -1066,10 +1315,10 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       };
 
       setInterval(function() {
-        if (ws && ws.readyState === WebSocket.OPEN) {
+        if (ws && ws.readyState === WebSocket.OPEN && !isTransferring) {
           ws.send(JSON.stringify({ type: 'hud-ping', t: performance.now() }));
         }
-      }, 3000);
+      }, 3500);
     }
 
     // ------------------------------------------------------------
@@ -1087,12 +1336,12 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       emptyHint.classList.add('hidden');
 
       const positions = [
-        { top: '18%', left: '22%' },
-        { top: '20%', left: '75%' },
-        { top: '72%', left: '24%' },
-        { top: '70%', left: '76%' },
-        { top: '45%', left: '14%' },
-        { top: '45%', left: '84%' }
+        { top: '20%', left: '22%' },
+        { top: '22%', left: '76%' },
+        { top: '74%', left: '24%' },
+        { top: '72%', left: '76%' },
+        { top: '46%', left: '16%' },
+        { top: '46%', left: '84%' }
       ];
 
       peerList.slice(0, 6).forEach(function(peer, idx) {
@@ -1100,16 +1349,16 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         const btn = document.createElement('button');
         btn.style.top = pos.top;
         btn.style.left = pos.left;
-        btn.className = 'absolute -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center group cursor-pointer';
+        btn.className = 'absolute -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center group cursor-pointer p-1';
         btn.onclick = function() { onRadarPeerClicked(peer); };
 
         const iconChar = peer.deviceType === 'mobile' ? '📱' : '🖥️';
         btn.innerHTML =
-          '<div class="w-10 h-10 rounded-2xl bg-gray-900 border-2 border-emerald-400 flex items-center justify-center text-lg shadow-lg group-hover:scale-110 transition-transform">' +
+          '<div class="w-11 h-11 rounded-2xl bg-gray-900 border-2 border-emerald-400 flex items-center justify-center text-xl shadow-lg group-hover:scale-110 active:scale-95 transition-transform">' +
             iconChar +
           '</div>' +
           '<span class="mt-1 px-2 py-0.5 rounded bg-gray-950/90 border border-gray-700 text-[10px] font-bold text-emerald-300 whitespace-nowrap">' +
-            escapeSafe(peer.name) + ' • Tap to Beam' +
+            escapeSafe(peer.name) + ' • Tap' +
           '</span>';
         container.appendChild(btn);
       });
@@ -1139,7 +1388,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     }
 
     // ------------------------------------------------------------
-    // 6. FILE SELECTION, FOLDER DRAG-AND-DROP, CTRL+V & OPTIONAL .ZIP BUNDLER
+    // 6. FILE SELECTION, FOLDER DRAG-DROP, CTRL+V & OPTIONAL .ZIP
     // ------------------------------------------------------------
     function handleFilesPicked(fileList) {
       if (!fileList || fileList.length === 0) return;
@@ -1168,12 +1417,11 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       document.getElementById('sender-title').innerText = title;
       document.getElementById('sender-subtitle').innerText = formatSize(totalSelectedBytes) + ' total';
 
-      // Show Optional "Bundle all into single .ZIP" button ONLY when >1 files are selected
       const zipBtn = document.getElementById('zip-bundle-btn');
       if (selectedFiles.length > 1) {
         zipBtn.classList.remove('hidden');
         zipBtn.disabled = false;
-        zipBtn.innerText = '📦 Bundle all into single .ZIP';
+        zipBtn.innerText = '📦 Bundle all into .ZIP';
       } else {
         zipBtn.classList.add('hidden');
       }
@@ -1183,14 +1431,14 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       selectedFiles.forEach(function(f, i) {
         const d = document.createElement('div');
         d.className = 'flex justify-between items-center text-gray-300 py-0.5 border-b border-gray-800/60 last:border-none';
-        d.innerHTML = '<span class="truncate max-w-[240px]">' + (i + 1) + '. ' + escapeSafe(f.webkitRelativePath || f.name) + '</span>' +
-                      '<span class="mono-font text-amber-400">' + formatSize(f.size) + '</span>';
+        d.innerHTML = '<span class="truncate max-w-[220px]">' + (i + 1) + '. ' + escapeSafe(f.webkitRelativePath || f.name) + '</span>' +
+                      '<span class="mono-font text-amber-400 ml-2">' + formatSize(f.size) + '</span>';
         qBox.appendChild(d);
       });
 
       const shareLink = window.location.origin + window.location.pathname + '?s=' + currentSessionId;
       document.getElementById('sender-link-input').value = shareLink;
-      drawQrCode(shareLink, 'sender-qr-canvas', 'sender-qr-fallback', 140);
+      drawQrCode(shareLink, 'sender-qr-canvas', 'sender-qr-fallback', 148);
 
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
@@ -1206,13 +1454,14 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       if (selectedFiles.length <= 1 || typeof JSZip === 'undefined') return;
       const zipBtn = document.getElementById('zip-bundle-btn');
       zipBtn.disabled = true;
-      zipBtn.innerText = '⏳ Compressing .ZIP...';
+      zipBtn.innerText = '⏳ Bundling .ZIP...';
 
       try {
         const zip = new JSZip();
         selectedFiles.forEach(function(file) {
           const pathName = file.webkitRelativePath || file.name;
-          zip.file(pathName, file);
+          // Use STORE (no CPU compression bottleneck) for fast bundling & maximum streaming speed
+          zip.file(pathName, file, { compression: 'STORE' });
         });
         const blob = await zip.generateAsync({ type: 'blob' });
         const zipFileName = 'ChocoBento-Bundle-' + Date.now().toString().slice(-4) + '.zip';
@@ -1308,7 +1557,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     }
 
     // ------------------------------------------------------------
-    // 7. RECEIVER PREVIEW & WEBRTC + TURBO RELAY STREAMING ENGINE
+    // 7. HYPER-STREAM ENGINE (ZERO-DELAY MAX SPEED P2P + TURBO RELAY)
     // ------------------------------------------------------------
     function renderReceiverPreviewList() {
       if (!incomingFilesMeta || incomingFilesMeta.length === 0) return;
@@ -1321,8 +1570,8 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       incomingFilesMeta.forEach(function(f, idx) {
         const row = document.createElement('div');
         row.className = 'flex justify-between items-center text-gray-300 py-1 border-b border-gray-800/60 last:border-none';
-        row.innerHTML = '<span class="truncate max-w-[240px]">📄 ' + (idx + 1) + '. ' + escapeSafe(f.name) + '</span>' +
-                        '<span class="mono-font text-amber-400">' + formatSize(f.size) + '</span>';
+        row.innerHTML = '<span class="truncate max-w-[220px]">📄 ' + (idx + 1) + '. ' + escapeSafe(f.name) + '</span>' +
+                        '<span class="mono-font text-amber-400 ml-2">' + formatSize(f.size) + '</span>';
         list.appendChild(row);
       });
     }
@@ -1335,7 +1584,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       rollingCrc = 0;
 
       showHubView('hub-active-transfer');
-      document.getElementById('active-role-badge').innerText = 'RECEIVING P2P';
+      document.getElementById('active-role-badge').innerText = 'RECEIVING MAX-SPEED';
       document.getElementById('integrity-badge').classList.add('hidden');
       setAmbientState('streaming', 'RECEIVING STREAM');
 
@@ -1346,6 +1595,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     const rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' }
       ]
     };
@@ -1368,7 +1618,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       };
 
       if (isInitiator) {
-        dataChannel = pc.createDataChannel('chocobento-stream', { ordered: true });
+        dataChannel = pc.createDataChannel('chocobento-hyperstream', { ordered: true });
         bindDataChannelEvents();
         pc.createOffer().then(function(o) {
           return pc.setLocalDescription(o);
@@ -1416,13 +1666,15 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
     function bindDataChannelEvents() {
       dataChannel.binaryType = 'arraybuffer';
+      dataChannel.bufferedAmountLowThreshold = WEBRTC_LOW_WATER_MARK;
+
       dataChannel.onopen = function() {
         if (p2pWatchdog) {
           clearTimeout(p2pWatchdog);
           p2pWatchdog = null;
         }
         usingFallbackRelay = false;
-        document.getElementById('hud-protocol-badge').innerText = 'WebRTC P2P Direct';
+        document.getElementById('hud-protocol-badge').innerText = 'WebRTC P2P Direct (128KB)';
         if (role === 'sender' && !isTransferring) {
           streamAllFiles(false);
         }
@@ -1447,20 +1699,21 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       packetsCount = 0;
       rollingCrc = 0;
 
-      document.getElementById('active-role-badge').innerText = 'BROADCASTING P2P';
+      document.getElementById('active-role-badge').innerText = 'HYPER-STREAMING';
       document.getElementById('integrity-badge').classList.add('hidden');
-      setAmbientState('streaming', 'STREAMING HIGH SPEED');
+      setAmbientState('streaming', 'MAX SPEED STREAMING');
 
       initPeerConnection(true, targetReceiverId);
 
+      // Fast 2.2s Fallback Watchdog so users on mobile data never wait long
       p2pWatchdog = setTimeout(function() {
         if (!isTransferring && (!dataChannel || dataChannel.readyState !== 'open')) {
           usingFallbackRelay = true;
-          document.getElementById('hud-protocol-badge').innerText = 'Turbo Relay Stream';
+          document.getElementById('hud-protocol-badge').innerText = 'Turbo 256KB Relay';
           ws.send(JSON.stringify({ type: 'switch-to-fallback' }));
           streamAllFiles(true);
         }
-      }, 3200);
+      }, 2200);
     }
 
     async function streamAllFiles(useRelay) {
@@ -1486,11 +1739,11 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         if (useRelay) ws.send(hdr);
         else dataChannel.send(hdr);
 
-        await pumpFileSlices(f, useRelay, function(chunkBuf) {
+        await pumpFileAtMaxThroughput(f, useRelay, function(chunkBuf) {
           sentBytesTotal += chunkBuf.byteLength;
           packetsCount++;
-          updateRollingCrc(chunkBuf);
-          updateTelemetryAndProgress(Math.max(sentBytesTotal, senderAckBytes), totalSelectedBytes);
+          updateRollingCrcFast(chunkBuf);
+          updateTelemetryAndProgress(Math.max(sentBytesTotal, senderAckBytes), totalSelectedBytes, false);
         });
 
         if (isAborted) return;
@@ -1503,39 +1756,61 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         const allFin = JSON.stringify({ type: 'all-complete' });
         if (useRelay) ws.send(allFin);
         else dataChannel.send(allFin);
-        updateTelemetryAndProgress(totalSelectedBytes, totalSelectedBytes);
+        updateTelemetryAndProgress(totalSelectedBytes, totalSelectedBytes, true);
         completeTransferSuccess('Broadcast Transfer 100% Verified!');
       }
     }
 
-    function pumpFileSlices(file, useRelay, onChunk) {
-      return new Promise(function(resolve) {
-        let offset = 0;
-        const reader = new FileReader();
+    // Unthrottled Continuous Buffer Pump (Zero setTimeout delay, saturates hardware pipe)
+    async function pumpFileAtMaxThroughput(file, useRelay, onChunk) {
+      const frameSize = useRelay ? RELAY_CHUNK_SIZE : WEBRTC_CHUNK_SIZE;
+      let offset = 0;
 
-        function nextSlice() {
-          if (isAborted || offset >= file.size) {
-            resolve();
-            return;
+      while (offset < file.size && !isAborted) {
+        // Respect backpressure only when hardware buffer hits 8MB ceiling
+        if (!useRelay && dataChannel) {
+          if (dataChannel.bufferedAmount > WEBRTC_HIGH_WATER_MARK) {
+            await waitForDataChannelDrain();
           }
-          if (!useRelay && dataChannel && dataChannel.bufferedAmount > 4 * 1024 * 1024) {
-            setTimeout(nextSlice, 20);
-            return;
+        } else if (useRelay && ws) {
+          while (ws.bufferedAmount > 16 * 1024 * 1024 && !isAborted) {
+            await new Promise(function(r) { setTimeout(r, 8); });
           }
-          reader.readAsArrayBuffer(file.slice(offset, offset + CHUNK_SIZE));
         }
 
-        reader.onload = function(e) {
-          if (isAborted) { resolve(); return; }
-          const buf = e.target.result;
-          if (useRelay) ws.send(buf);
-          else dataChannel.send(buf);
-          offset += buf.byteLength;
-          onChunk(buf);
-          setTimeout(nextSlice, 1);
-        };
+        if (isAborted) break;
 
-        nextSlice();
+        const slice = file.slice(offset, offset + frameSize);
+        const buf = await slice.arrayBuffer();
+        if (isAborted) break;
+
+        if (useRelay) {
+          ws.send(buf);
+        } else {
+          dataChannel.send(buf);
+        }
+
+        offset += buf.byteLength;
+        onChunk(buf);
+      }
+    }
+
+    function waitForDataChannelDrain() {
+      return new Promise(function(resolve) {
+        if (!dataChannel || dataChannel.readyState !== 'open' || dataChannel.bufferedAmount <= WEBRTC_LOW_WATER_MARK) {
+          resolve();
+          return;
+        }
+        let resolved = false;
+        const done = function() {
+          if (!resolved) {
+            resolved = true;
+            dataChannel.onbufferedamountlow = null;
+            resolve();
+          }
+        };
+        dataChannel.onbufferedamountlow = done;
+        setTimeout(done, 35);
       });
     }
 
@@ -1552,11 +1827,13 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       currentFileChunks.push(buf);
       totalReceivedBytes += buf.byteLength;
       packetsCount++;
-      updateRollingCrc(buf);
-      updateTelemetryAndProgress(totalReceivedBytes, incomingTotalBytes);
+      updateRollingCrcFast(buf);
+
+      const isDone = totalReceivedBytes >= incomingTotalBytes;
+      updateTelemetryAndProgress(totalReceivedBytes, incomingTotalBytes, isDone);
 
       const now = performance.now();
-      if (now - lastAckTimestamp > 80 || totalReceivedBytes >= incomingTotalBytes) {
+      if (now - lastAckTimestamp > 90 || isDone) {
         lastAckTimestamp = now;
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'progress-ack', receivedBytes: totalReceivedBytes }));
@@ -1574,43 +1851,49 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      setTimeout(function() { URL.revokeObjectURL(url); }, 10000);
+      setTimeout(function() { URL.revokeObjectURL(url); }, 12000);
       currentFileChunks = [];
     }
 
     // ------------------------------------------------------------
-    // 8. TELEMETRY HUD, TAB TITLE PROGRESS, CRC32 & AUDIO CHIME
+    // 8. 60FPS THROTTLED TELEMETRY HUD, CRC32 & AUDIO CHIME
     // ------------------------------------------------------------
-    function updateRollingCrc(arrayBuf) {
+    function updateRollingCrcFast(arrayBuf) {
       const view = new Uint8Array(arrayBuf);
-      const step = Math.max(1, Math.floor(view.length / 32));
-      for (let i = 0; i < view.length; i += step) {
+      const len = view.length;
+      const step = Math.max(1, Math.floor(len / 16));
+      for (let i = 0; i < len; i += step) {
         rollingCrc = ((rollingCrc << 5) - rollingCrc + view[i]) | 0;
       }
-      const hex = (rollingCrc >>> 0).toString(16).toUpperCase().padStart(8, '0');
-      document.getElementById('hud-crc').innerText = '0x' + hex;
     }
 
-    function updateTelemetryAndProgress(doneBytes, totalBytes) {
+    function updateTelemetryAndProgress(doneBytes, totalBytes, forceRender) {
       if (totalBytes <= 0) return;
+      const now = performance.now();
+      // Throttle DOM & Canvas repaints to ~16fps (every 60ms) so CPU stays 100% focused on network throughput
+      if (!forceRender && (now - lastUiRenderTime < 60)) return;
+      lastUiRenderTime = now;
+
       const clamped = Math.min(doneBytes, totalBytes);
       const pct = Math.min(100, Math.round((clamped / totalBytes) * 100));
 
-      const elapsed = Math.max(0.1, (performance.now() - transferStartTime) / 1000);
+      const elapsed = Math.max(0.05, (now - transferStartTime) / 1000);
       const bps = clamped / elapsed;
       const mbps = bps / (1024 * 1024);
       if (mbps > peakSpeedMbps) peakSpeedMbps = mbps;
       const eta = bps > 0 ? Math.ceil((totalBytes - clamped) / bps) : 0;
+
+      const hexCrc = (rollingCrc >>> 0).toString(16).toUpperCase().padStart(8, '0');
 
       document.getElementById('active-percent-text').innerText = pct + '%';
       document.getElementById('active-progress-fill').style.width = pct + '%';
       document.getElementById('active-bytes-counter').innerText = formatSize(clamped) + ' / ' + formatSize(totalBytes);
       document.getElementById('hud-speed').innerText = mbps.toFixed(2) + ' MB/s';
       document.getElementById('hud-eta').innerText = eta + ' s';
+      document.getElementById('hud-crc').innerText = '0x' + hexCrc;
       document.getElementById('telemetry-packets').innerText = packetsCount + ' pkts';
       document.getElementById('telemetry-peak').innerText = peakSpeedMbps.toFixed(2) + ' MB/s';
 
-      // Live Browser Tab Title Progress
       document.title = '[' + pct + '% • ' + mbps.toFixed(1) + ' MB/s] ChocoBento P2P';
 
       speedSamples.push(mbps);
@@ -1739,7 +2022,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     }
 
     // ------------------------------------------------------------
-    // 10. P2P SCRATCHPAD, CODE FORMATTER & QR UTILITIES
+    // 10. P2P SCRATCHPAD, NATIVE SHARE & QR UTILITIES
     // ------------------------------------------------------------
     function onScratchpadInput(textVal) {
       document.getElementById('scratchpad-char-count').innerText = textVal.length + ' chars';
@@ -1789,7 +2072,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           new QRious({
             element: canvas,
             value: textData,
-            size: pxSize || 150,
+            size: pxSize || 148,
             background: '#ffffff',
             foreground: '#000000',
             level: 'M'
@@ -1812,7 +2095,18 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       navigator.clipboard.writeText(inp.value);
       const btn = document.getElementById('copy-link-btn');
       btn.innerText = 'Copied ✓';
-      setTimeout(function() { btn.innerText = 'Copy'; }, 1800);
+      setTimeout(function() { btn.innerText = 'Copy Link'; }, 1800);
+    }
+
+    function nativeShareBroadcastLink() {
+      const url = document.getElementById('sender-link-input').value;
+      if (navigator.share) {
+        navigator.share({
+          title: 'ChocoBento P2P File Transfer',
+          text: 'Download my file directly peer-to-peer:',
+          url: url
+        }).catch(function() {});
+      }
     }
 
     function openQrCameraModal() {
@@ -1821,7 +2115,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       qrScannerInstance = new Html5Qrcode('html5-qr-reader');
       qrScannerInstance.start(
         { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 210, height: 210 } },
+        { fps: 12, qrbox: { width: 220, height: 220 } },
         function(decodedUrl) {
           closeQrCameraModal();
           window.location.href = decodedUrl;
@@ -1867,5 +2161,5 @@ app.get('*', (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log('ChocoBento P2P Command Center running on port ' + PORT);
+  console.log('ChocoBento P2P Hyper-Speed Command Center running on port ' + PORT);
 });
