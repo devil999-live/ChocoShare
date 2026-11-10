@@ -391,8 +391,8 @@ app.get('/manifest.json', (req, res) => {
   res.setHeader('Content-Type', 'application/manifest+json');
   res.send(JSON.stringify({
     id: '/',
-    name: 'ChocoBento P2P — Hyper-Speed File Transfer',
-    short_name: 'ChocoBento',
+    name: 'ChocoShare P2P — Hyper-Speed File Transfer',
+    short_name: 'ChocoShare',
     description: 'Zero-Log, Direct Peer-to-Peer File & Folder Sharing Command Center',
     start_url: '/',
     scope: '/',
@@ -420,7 +420,7 @@ app.get('/manifest.json', (req, res) => {
 });
 
 const SERVICE_WORKER_JS = `
-const CACHE_NAME = 'chocobento-pwa-v3';
+const CACHE_NAME = 'ChocoShare-pwa-v3';
 const PRECACHE_URLS = ['/', '/manifest.json', '/icon-192.svg', '/icon-512.svg'];
 
 self.addEventListener('install', (event) => {
@@ -473,11 +473,11 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="ChocoBento">
+  <meta name="apple-mobile-web-app-title" content="ChocoShare">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/svg+xml" href="/icon-192.svg">
   <link rel="apple-touch-icon" href="/icon-192.svg">
-  <title>ChocoBento P2P — Command Center</title>
+  <title>ChocoShare P2P — Command Center</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrious/4.0.2/qrious.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -1094,9 +1094,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       } else {
         const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone;
         if (isStandalone) {
-          alert('ChocoBento is already installed and running as a standalone app!');
+          alert('ChocoShare is already installed and running as a standalone app!');
         } else {
-          alert('To install ChocoBento as a standalone app: Tap the Chrome three-dot menu (⋮) at the top right and select "Install app".');
+          alert('To install ChocoShare as a standalone app: Tap the Chrome three-dot menu (⋮) at the top right and select "Install app".');
         }
       }
     }
@@ -1122,7 +1122,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       else if (/Linux/i.test(ua)) { os = 'Linux'; icon = '🐧'; devType = 'desktop'; }
 
       const adjectives = ['Swift', 'Cyber', 'Nova', 'Hyper', 'Quantum', 'Apex', 'Sonic', 'Titan'];
-      const savedName = localStorage.getItem('chocobento_nick');
+      const savedName = localStorage.getItem('ChocoShare_nick');
       const randomTag = adjectives[Math.floor(Math.random() * adjectives.length)] + ' ' + os;
       const finalName = savedName || randomTag;
 
@@ -1150,7 +1150,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       const next = prompt('Enter a recognizable nickname for this device on the Sonar Radar:', myDeviceInfo.name);
       if (next && next.trim()) {
         myDeviceInfo.name = next.trim().substring(0, 22);
-        localStorage.setItem('chocobento_nick', myDeviceInfo.name);
+        localStorage.setItem('ChocoShare_nick', myDeviceInfo.name);
         document.getElementById('my-device-name').innerText = myDeviceInfo.name;
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({ type: 'update-peer-name', name: myDeviceInfo.name }));
@@ -1464,7 +1464,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           zip.file(pathName, file, { compression: 'STORE' });
         });
         const blob = await zip.generateAsync({ type: 'blob' });
-        const zipFileName = 'ChocoBento-Bundle-' + Date.now().toString().slice(-4) + '.zip';
+        const zipFileName = 'ChocoShare-Bundle-' + Date.now().toString().slice(-4) + '.zip';
         const bundledFile = new File([blob], zipFileName, { type: 'application/zip' });
 
         selectedFiles = [bundledFile];
@@ -1618,7 +1618,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       };
 
       if (isInitiator) {
-        dataChannel = pc.createDataChannel('chocobento-hyperstream', { ordered: true });
+        dataChannel = pc.createDataChannel('ChocoShare-hyperstream', { ordered: true });
         bindDataChannelEvents();
         pc.createOffer().then(function(o) {
           return pc.setLocalDescription(o);
@@ -1894,7 +1894,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       document.getElementById('telemetry-packets').innerText = packetsCount + ' pkts';
       document.getElementById('telemetry-peak').innerText = peakSpeedMbps.toFixed(2) + ' MB/s';
 
-      document.title = '[' + pct + '% • ' + mbps.toFixed(1) + ' MB/s] ChocoBento P2P';
+      document.title = '[' + pct + '% • ' + mbps.toFixed(1) + ' MB/s] ChocoShare P2P';
 
       speedSamples.push(mbps);
       if (speedSamples.length > 45) speedSamples.shift();
@@ -1947,7 +1947,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       document.getElementById('active-progress-fill').style.width = '100%';
       document.getElementById('hud-eta').innerText = '0 s';
       document.getElementById('integrity-badge').classList.remove('hidden');
-      document.title = '✓ 100% Verified — ChocoBento P2P';
+      document.title = '✓ 100% Verified — ChocoShare P2P';
       setAmbientState('connected', '100% VERIFIED COMPLETE');
       playCompletionChime();
     }
@@ -1989,7 +1989,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       isTransferring = false;
       currentFileChunks = [];
       totalReceivedBytes = 0;
-      document.title = 'ChocoBento P2P — Command Center';
+      document.title = 'ChocoShare P2P — Command Center';
       setAmbientState('aborted', 'TRANSFER STOPPED');
       if (pc) {
         try { pc.close(); } catch (e) {}
@@ -2102,7 +2102,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       const url = document.getElementById('sender-link-input').value;
       if (navigator.share) {
         navigator.share({
-          title: 'ChocoBento P2P File Transfer',
+          title: 'ChocoShare P2P File Transfer',
           text: 'Download my file directly peer-to-peer:',
           url: url
         }).catch(function() {});
@@ -2161,5 +2161,5 @@ app.get('*', (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log('ChocoBento P2P Hyper-Speed Command Center running on port ' + PORT);
+  console.log('ChocoShare P2P Hyper-Speed Command Center running on port ' + PORT);
 });
