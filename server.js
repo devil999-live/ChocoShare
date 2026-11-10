@@ -30,12 +30,10 @@ wss.on('connection', (ws) => {
       }
       rooms.get(currentRoom).add(ws);
       
-      // Notify peer count
       const peerCount = rooms.get(currentRoom).size;
       ws.send(JSON.stringify({ type: 'room-status', peers: peerCount }));
     } 
     else if (data.type === 'signal' && currentRoom) {
-      // Relay WebRTC signaling payload (offer/answer/ice) to peers in the same room
       const roomPeers = rooms.get(currentRoom);
       if (roomPeers) {
         roomPeers.forEach((peer) => {
@@ -57,7 +55,7 @@ wss.on('connection', (ws) => {
   });
 });
 
-// Serve the embedded frontend UI
+// Serve the fully embedded frontend UI
 app.get('*', (req, res) => {
   res.send(`<!DOCTYPE html>
 <html lang="en" class="dark">
@@ -97,9 +95,6 @@ app.get('*', (req, res) => {
       backdrop-filter: blur(12px);
       border: 1px solid rgba(75, 85, 99, 0.3);
       box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 10px 10px -5px rgba(0, 0, 0, 0.4);
-    }
-    .glow-green {
-      box-shadow: 0 0 20px rgba(16, 185, 129, 0.4);
     }
   </style>
 </head>
@@ -141,7 +136,7 @@ app.get('*', (req, res) => {
         </button>
       </div>
 
-      <!-- Active Transfer Dashboard (Hidden Initially) -->
+      <!-- Active Transfer Dashboard -->
       <div id="dashboard" class="hidden space-y-6 text-left">
         <div class="flex justify-between items-center bg-gray-900/60 p-4 rounded-xl border border-gray-800">
           <div>
@@ -195,7 +190,7 @@ app.get('*', (req, res) => {
   </footer>
 
   <script>
-    const CHUNK_SIZE = 64 * 1024; // 64KB chunks
+    const CHUNK_SIZE = 64 * 1024;
     let ws, pc, dataChannel;
     let roomId = window.location.hash.substring(1);
     
@@ -205,9 +200,8 @@ app.get('*', (req, res) => {
     }
     document.getElementById('share-link').value = window.location.href;
 
-    // Initialize WebSocket Signaling
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    ws = new WebSocket(\`\${protocol}//\${window.location.host}\`);
+    ws = new WebSocket(protocol + '//' + window.location.host);
 
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: 'join-room', room: roomId }));
@@ -383,5 +377,5 @@ app.get('*', (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(\`NexusShare server running on port \${PORT}\`);
+  console.log('NexusShare server running on port ' + PORT);
 });
