@@ -1,0 +1,16 @@
+{
+  "name": "p2p-sharer",
+  "version": "1.0.0",
+  "description": "Zero-log, browser-to-browser P2P file sharing with live analytics",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.16.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
