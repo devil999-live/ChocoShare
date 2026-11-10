@@ -576,12 +576,11 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       flex-direction: column !important;
     }
 
-    /* Prevent iOS/Android auto-zoom on input focus */
+    /* Prevent iOS/Android auto-zoom on input focus & handle Mobile Tab Panes */
     @media (max-width: 768px) {
       input, textarea, select {
         font-size: 16px !important;
       }
-      /* Mobile Separated Tab Panes Visibility Engine */
       .mobile-tab-pane {
         display: none !important;
       }
@@ -601,7 +600,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     .custom-scroll::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.3); border-radius: 9999px; }
   </style>
 </head>
-<body data-state="idle" data-accent="amber" class="p-2.5 sm:p-4 lg:p-6 pb-20 lg:pb-6 flex flex-col justify-between">
+<body data-state="idle" data-accent="amber" class="p-2.5 sm:p-4 lg:p-6 pb-24 lg:pb-6 flex flex-col justify-between">
 
   <!-- FLOATING PILL DOCK NAVIGATION (ADAPTIVE FOR SMARTPHONE & LAPTOP) -->
   <header class="max-w-7xl w-full mx-auto mb-3.5 sm:mb-5 flex flex-wrap items-center justify-between gap-2 bg-gray-950/85 backdrop-blur-xl border border-gray-800/90 rounded-2xl px-3 sm:px-4 py-2.5 shadow-2xl sticky top-2 z-40">
@@ -642,7 +641,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       <!-- Dedicated PWA Install App Button -->
       <button id="pwa-install-btn" onclick="triggerPwaInstall()" class="hidden touch-btn px-3 py-1.5 rounded-xl accent-bg text-gray-950 font-extrabold text-xs shadow-lg flex items-center space-x-1.5 transition-all">
         <span>📲</span>
-        <span>Install</span>
+        <span>Install App</span>
       </button>
 
       <div class="flex items-center space-x-1.5 bg-gray-900 px-2.5 py-2 rounded-xl border border-gray-800" title="Switch Metallic Neon Accent">
@@ -652,13 +651,14 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         <button onclick="setAccent('crimson')" aria-label="Crimson Theme" class="w-4 h-4 rounded-full bg-rose-500 hover:scale-125 transition-transform"></button>
       </div>
 
-      <button onclick="openQrCameraModal()" class="touch-btn px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-xs font-bold text-white flex items-center space-x-1 transition-all">
+      <button onclick="openQrCameraModal()" class="touch-btn px-3 sm:px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-xs font-bold text-white flex items-center space-x-1.5 transition-all">
         <span class="text-base">📷</span>
+        <span class="hidden sm:inline">Scan QR</span>
       </button>
     </div>
   </header>
 
-  <!-- BENTO-GRID WORKSPACE (SEPARATED MOBILE TABS + LAPTOP GRID) -->
+  <!-- PERSISTENT BENTO-GRID WORKSPACE (SEPARATED MOBILE TABS + LAPTOP GRID) -->
   <main class="max-w-7xl w-full mx-auto flex-grow grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-5">
 
     <!-- ========================================================== -->
@@ -666,10 +666,10 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     <!-- ========================================================== -->
     <div class="lg:col-span-7 flex flex-col gap-4 sm:gap-5">
 
-      <!-- TAB 1 PANE: TRANSFER COMMAND HUB -->
+      <!-- BENTO MODULE 1 (MOBILE TAB 1): PRIMARY TRANSFER COMMAND HUB -->
       <div id="pane-transfer" class="mobile-tab-pane active-tab bento-card rounded-3xl p-4 sm:p-6 flex-grow flex flex-col justify-between relative overflow-hidden">
 
-        <!-- VIEW 1A: IDLE DROPZONE -->
+        <!-- VIEW 1A: IDLE DROPZONE (ADAPTIVE FOR TOUCH SMARTPHONES & LAPTOP DRAG-DROP) -->
         <div id="hub-idle" class="my-auto space-y-4">
           <div id="bento-dropzone"
                onclick="document.getElementById('file-input').click()"
@@ -683,6 +683,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
             <h2 id="dropzone-headline" class="mt-3.5 text-base sm:text-xl font-extrabold text-white">Tap to select files or drop folders here</h2>
             <p class="mt-1 text-xs text-gray-400">Supports unlimited file sizes • <kbd class="px-1.5 py-0.5 rounded bg-gray-800 text-amber-400 mono-font">Ctrl + V</kbd> clipboard paste ready</p>
 
+            <!-- Touch-Friendly Action Buttons -->
             <div class="mt-5 grid grid-cols-1 sm:grid-cols-2 gap-2.5 max-w-md mx-auto" onclick="event.stopPropagation()">
               <button onclick="document.getElementById('file-input').click()" class="touch-btn w-full px-4 py-3 rounded-xl accent-bg text-gray-950 font-extrabold text-xs sm:text-sm shadow-lg hover:opacity-90 active:scale-98 transition-all">
                 + Select File(s)
@@ -700,7 +701,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           </div>
         </div>
 
-        <!-- VIEW 1B: SENDER BROADCAST HUB -->
+        <!-- VIEW 1B: SENDER BROADCAST HUB (QR + 4-DIGIT CODE + OPTIONAL .ZIP BUNDLER) -->
         <div id="hub-sender-ready" class="hidden space-y-4 my-auto">
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
             <div class="min-w-0 flex-1">
@@ -722,8 +723,10 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
             </div>
           </div>
 
+          <!-- Compact File Queue List -->
           <div id="sender-file-queue" class="max-h-24 overflow-y-auto custom-scroll bg-gray-950/70 p-2.5 rounded-xl border border-gray-800/90 space-y-1 text-xs"></div>
 
+          <!-- QR Code + 4-Digit Code + Link Grid -->
           <div class="grid grid-cols-1 sm:grid-cols-12 gap-4 items-center bg-gray-950/60 p-3.5 rounded-2xl border border-gray-800">
             <div class="sm:col-span-5 flex flex-col items-center justify-center">
               <div class="bg-white p-2.5 rounded-2xl shadow-lg border-2 border-amber-400 w-[168px] h-[168px] flex items-center justify-center">
@@ -737,6 +740,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
               <div class="flex items-center justify-between bg-gray-900/90 px-3.5 py-2.5 rounded-xl border border-gray-800">
                 <div>
                   <p class="text-[10px] uppercase font-bold text-gray-400">4-Digit Nearby Code</p>
+                  <p class="text-[11px] text-gray-500">Or tap device on Sonar Radar</p>
                 </div>
                 <span id="sender-code4" class="text-2xl sm:text-3xl font-black tracking-[0.2em] accent-text mono-font">----</span>
               </div>
@@ -759,7 +763,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           </div>
         </div>
 
-        <!-- VIEW 1C: RECEIVER PREVIEW -->
+        <!-- VIEW 1C: RECEIVER PREVIEW (SHOWS FILE NAME, SIZE & DOWNLOAD BUTTON BEFORE STREAMING) -->
         <div id="hub-receiver-preview" class="hidden my-auto space-y-5 text-center py-3">
           <div class="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-xs font-bold">
             <span>📥 Incoming High-Speed P2P Transfer</span>
@@ -782,7 +786,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           </div>
         </div>
 
-        <!-- VIEW 1D: ACTIVE TRANSFER HUD -->
+        <!-- VIEW 1D: ACTIVE TRANSFER PROGRESS HUD (SHOWN ON BOTH SENDER & RECEIVER) -->
         <div id="hub-active-transfer" class="hidden my-auto space-y-4">
           <div class="flex flex-wrap items-center justify-between gap-2 border-b border-gray-800 pb-3">
             <div class="min-w-0 flex-1">
@@ -805,6 +809,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
             </div>
           </div>
 
+          <!-- Progress Bar & Percentage -->
           <div class="space-y-2">
             <div class="flex justify-between items-end">
               <span id="active-status-text" class="text-xs text-gray-300 font-medium">Pumping unthrottled binary frames...</span>
@@ -819,6 +824,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
             </div>
           </div>
 
+          <!-- Speed, ETA, Checksum Row -->
           <div class="grid grid-cols-3 gap-2.5 sm:gap-3 text-center">
             <div class="bg-gray-950/75 p-2.5 sm:p-3 rounded-xl border border-gray-800">
               <p class="text-[10px] uppercase text-gray-400">Live Speed</p>
@@ -837,7 +843,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
       </div>
 
-      <!-- TELEMETRY CARD -->
+      <!-- BENTO MODULE 2: CYBER-HUD TELEMETRY & THROUGHPUT GRAPH -->
       <div id="telemetry-bento-card" class="bento-card rounded-3xl p-4 sm:p-5 space-y-3">
         <div class="flex items-center justify-between">
           <div class="flex items-center space-x-2">
@@ -852,6 +858,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           </div>
         </div>
 
+        <!-- 4 Cyber-HUD Telemetry Pills -->
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center mono-font">
           <div class="bg-gray-950/80 p-2 rounded-xl border border-gray-800/90">
             <span class="text-[10px] text-gray-400 block">PING LATENCY</span>
@@ -871,6 +878,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           </div>
         </div>
 
+        <!-- Live Throughput Canvas -->
         <div class="bg-gray-950/90 p-2.5 rounded-2xl border border-gray-800 flex-grow">
           <canvas id="telemetry-canvas" width="520" height="80" class="w-full h-[75px] sm:h-[85px] block"></canvas>
         </div>
@@ -883,7 +891,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     <!-- ========================================================== -->
     <div class="lg:col-span-5 flex flex-col gap-4 sm:gap-5">
 
-      <!-- TAB 2 PANE: SONAR RADAR -->
+      <!-- BENTO MODULE 3 (MOBILE TAB 2): AIRDROP-STYLE SONAR RADAR -->
       <div id="pane-radar" class="mobile-tab-pane bento-card rounded-3xl p-4 sm:p-5 space-y-3.5">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div>
@@ -894,6 +902,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
             <p class="text-[11px] text-gray-400 mt-0.5">Tap any discovered device to beam files instantly</p>
           </div>
 
+          <!-- Local Device Smart Identity Pill -->
           <button onclick="promptRenameDevice()" class="touch-btn px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-[11px] font-bold text-amber-300 flex items-center space-x-1.5" title="Tap to rename your device">
             <span id="my-os-icon">💻</span>
             <span id="my-device-name" class="truncate max-w-[120px]">My Device</span>
@@ -901,16 +910,19 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           </button>
         </div>
 
+        <!-- Interactive Concentric Sonar Radar Box -->
         <div class="relative h-48 sm:h-44 rounded-2xl bg-gray-950/90 border border-gray-800 overflow-hidden flex items-center justify-center">
           <div class="w-40 h-40 rounded-full border border-gray-800/80 absolute"></div>
           <div class="w-28 h-28 rounded-full border border-gray-800/80 absolute"></div>
           <div class="w-14 h-14 rounded-full border border-gray-800/80 absolute"></div>
           <div class="w-44 h-44 rounded-full radar-sweep opacity-25 absolute pointer-events-none"></div>
 
+          <!-- Center Self Node -->
           <div class="z-10 w-10 h-10 rounded-full accent-bg text-gray-950 font-black flex items-center justify-center shadow-lg text-xs" title="You">
             YOU
           </div>
 
+          <!-- Dynamic Nearby Peer Nodes Container -->
           <div id="radar-nodes-layer" class="absolute inset-0"></div>
 
           <div id="radar-empty-hint" class="absolute bottom-2 inset-x-2 text-center text-[11px] text-gray-500 pointer-events-none">
@@ -918,6 +930,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           </div>
         </div>
 
+        <!-- 4-Digit Code Direct Input Bar -->
         <div class="flex gap-2">
           <input type="text" id="radar-code-input" inputmode="numeric" pattern="[0-9]*" maxlength="4" placeholder="Enter 4-Digit Code"
                  class="w-full bg-gray-950 border border-gray-700 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-sm font-bold tracking-widest text-center mono-font text-white focus:outline-none">
@@ -927,7 +940,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         </div>
       </div>
 
-      <!-- TAB 3 PANE: P2P TEXT & CODE SCRATCHPAD -->
+      <!-- BENTO MODULE 4 (MOBILE TAB 3): INSTANT P2P TEXT & LINK SCRATCHPAD -->
       <div id="pane-scratchpad" class="mobile-tab-pane bento-card rounded-3xl p-4 sm:p-5 flex-grow flex flex-col justify-between space-y-3">
         <div class="flex flex-wrap items-center justify-between gap-2">
           <div class="flex items-center space-x-2">
@@ -948,7 +961,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
             <button onclick="clearScratchpadText()" class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-rose-300 border border-gray-700">
               Clear
             </button>
-            <button onclick="toggleMaximizeCard('scratchpad-bento-card')" class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-gray-300">
+            <button onclick="toggleMaximizeCard('pane-scratchpad')" class="px-2.5 py-1.5 rounded-lg bg-gray-800 hover:bg-gray-700 text-[10px] font-bold text-gray-300">
               ⛶
             </button>
           </div>
@@ -969,7 +982,40 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
   </main>
 
-  <!-- SMARTPHONE BOTTOM SEPARATED TAB NAVIGATION BAR -->
+  <!-- ========================================================== -->
+  <!-- ADSTERRA RESPONSIVE BANNER FOOTER AD ZONE                  -->
+  <!-- ========================================================== -->
+  <footer class="max-w-7xl w-full mx-auto text-center py-3 mt-4 border-t border-gray-800/80 bg-gray-950/60 rounded-2xl z-30">
+    <!-- Desktop Banner (728x90) - Shown on Laptops/Desktops -->
+    <div class="hidden md:flex justify-center items-center overflow-hidden min-h-[90px]">
+      <script type="text/javascript">
+        atOptions = {
+          'key' : '79e0509af3fc6cfd74a66c6fc64be51f',
+          'format' : 'iframe',
+          'height' : 90,
+          'width' : 728,
+          'params' : {}
+        };
+      </script>
+      <script type="text/javascript" src="https://www.highperformanceformat.com/79e0509af3fc6cfd74a66c6fc64be51f/invoke.js"></script>
+    </div>
+
+    <!-- Mobile Banner (320x50) - Shown on Smartphones (with bottom clearance for mobile tab dock) -->
+    <div class="flex md:hidden justify-center items-center overflow-hidden min-h-[50px] pb-2">
+      <script type="text/javascript">
+        atOptions = {
+          'key' : '7b9c76e9cde389484b239913397f0cc7',
+          'format' : 'iframe',
+          'height' : 50,
+          'width' : 320,
+          'params' : {}
+        };
+      </script>
+      <script type="text/javascript" src="https://www.highperformanceformat.com/7b9c76e9cde389484b239913397f0cc7/invoke.js"></script>
+    </div>
+  </footer>
+
+  <!-- SMARTPHONE BOTTOM SEPARATED TAB NAVIGATION BAR (VISIBLE ON MOBILE PHONES ONLY) -->
   <nav class="lg:hidden fixed bottom-0 inset-x-0 z-40 bg-gray-950/95 backdrop-blur-xl border-t border-gray-800 px-2 py-1.5 grid grid-cols-4 gap-1 text-[10px] font-bold text-gray-400">
     <button id="nav-tab-transfer" onclick="switchMobileTab('pane-transfer')" class="touch-btn flex flex-col items-center justify-center rounded-xl hover:bg-gray-900 py-1 accent-text">
       <span class="text-base">🚀</span>
@@ -985,7 +1031,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     </button>
     <button onclick="triggerPwaInstall()" class="touch-btn flex flex-col items-center justify-center rounded-xl hover:bg-gray-900 py-1 text-emerald-400">
       <span class="text-base">📲</span>
-      <span>Install</span>
+      <span>Install App</span>
     </button>
   </nav>
 
@@ -996,11 +1042,11 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         <h3 class="text-base font-extrabold text-white">☕ Support & Tip Jar</h3>
         <button onclick="closeUpiTipModal()" class="touch-btn px-2 text-gray-400 hover:text-white text-xs font-bold">✕</button>
       </div>
-      <p class="text-xs text-gray-300">If this tool saved you time, fuel your next project with a coffee or UPI tip!</p>
+      <p class="text-xs text-gray-300">If ChocoShare saved you time, fuel our next update with a coffee or UPI tip!</p>
       
       <div class="bg-gray-950 p-4 rounded-2xl border border-gray-800 space-y-2">
         <p class="text-[10px] uppercase font-bold text-gray-400">UPI ID / GooglePay / PhonePe</p>
-        <p class="text-sm font-bold accent-text mono-font select-all">rajavinash1473@okaxis</p>
+        <p class="text-sm font-bold accent-text mono-font select-all">aryantip@upi</p>
         <button onclick="copyUpiId()" id="upi-copy-btn" class="touch-btn w-full py-2.5 rounded-xl accent-bg text-gray-950 font-extrabold text-xs">
           Copy UPI ID
         </button>
@@ -1039,25 +1085,31 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
   <!-- CLIENT-SIDE HYPER-STREAM ENGINE + PWA INSTALLER            -->
   <!-- ========================================================== -->
   <script>
+    // High-Speed Chunk Constants:
+    // 128KB for WebRTC DataChannel (safe across all Chromium/Firefox SCTP implementations)
+    // 256KB for Turbo WebSocket Binary Relay (maximum TCP frame saturation)
     const WEBRTC_CHUNK_SIZE = 128 * 1024;
     const RELAY_CHUNK_SIZE = 256 * 1024;
-    const WEBRTC_HIGH_WATER_MARK = 8 * 1024 * 1024;
-    const WEBRTC_LOW_WATER_MARK = 2 * 1024 * 1024;
+    const WEBRTC_HIGH_WATER_MARK = 8 * 1024 * 1024;  // 8MB pipe buffer
+    const WEBRTC_LOW_WATER_MARK = 2 * 1024 * 1024;   // Resume immediately at 2MB
 
     let ws = null;
     let pc = null;
     let dataChannel = null;
     let iceQueue = [];
 
+    // Local Smart Device Identity
     const myPeerId = 'peer-' + Math.random().toString(36).substring(2, 10);
     let myDeviceInfo = detectSmartDeviceIdentity();
     let pendingBeamTargetPeerId = null;
 
+    // File Session State
     let selectedFiles = [];
     let totalSelectedBytes = 0;
     let currentSessionId = new URLSearchParams(window.location.search).get('s') || null;
     let role = currentSessionId ? 'receiver' : 'sender';
 
+    // Streaming & Telemetry State
     let isTransferring = false;
     let isAborted = false;
     let usingFallbackRelay = false;
@@ -1070,6 +1122,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     let rollingCrc = 0;
     let lastUiRenderTime = 0;
 
+    // Receiver Buffers
     let incomingFilesMeta = [];
     let incomingTotalBytes = 0;
     let activeFileHeader = null;
@@ -1077,10 +1130,14 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     let totalReceivedBytes = 0;
     let lastAckTimestamp = 0;
 
+    // Wake-Lock, QR Scanner & PWA Install Prompt
     let wakeLockSentinel = null;
     let qrScannerInstance = null;
     let deferredPwaPrompt = null;
 
+    // ------------------------------------------------------------
+    // 0. STANDALONE PWA SERVICE WORKER & INSTALL PROMPT HANDLER
+    // ------------------------------------------------------------
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function() {
         navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function() {});
@@ -1143,6 +1200,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       setTimeout(function() { b.innerText = 'Copy UPI ID'; }, 2000);
     }
 
+    // ------------------------------------------------------------
+    // 1. SMART DEVICE CODENAME & ADAPTIVE UI ERGONOMICS
+    // ------------------------------------------------------------
     function detectSmartDeviceIdentity() {
       const ua = navigator.userAgent || '';
       let os = 'Desktop';
@@ -1163,6 +1223,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       document.getElementById('my-os-icon').innerText = icon;
       document.getElementById('my-device-name').innerText = finalName;
 
+      // Adapt UI copy & buttons specifically for Smartphone vs Laptop
       const modeLabel = document.getElementById('device-mode-label');
       const dropHeadline = document.getElementById('dropzone-headline');
       const nativeShareBtn = document.getElementById('native-share-btn');
@@ -1191,6 +1252,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       }
     }
 
+    // ------------------------------------------------------------
+    // 2. STATE-REACTIVE AMBIENT LIGHTING & ACCENT SWITCHER
+    // ------------------------------------------------------------
     function setAmbientState(stateName, labelText) {
       document.body.setAttribute('data-state', stateName);
       const pill = document.getElementById('ambient-state-pill');
@@ -1206,6 +1270,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       if (el) el.classList.toggle('maximized-card');
     }
 
+    // ------------------------------------------------------------
+    // 3. AUTOMATIC SCREEN WAKE-LOCK
+    // ------------------------------------------------------------
     async function requestScreenWakeLock() {
       if ('wakeLock' in navigator) {
         try {
@@ -1218,6 +1285,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       }
     }
 
+    // ------------------------------------------------------------
+    // 4. WEBSOCKET SIGNALING & RADAR ENGINE
+    // ------------------------------------------------------------
     function initSignaling() {
       const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       ws = new WebSocket(proto + '//' + window.location.host);
@@ -1235,6 +1305,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         if (currentSessionId && role === 'receiver') {
           setAmbientState('connected', 'PEER LINK OPEN');
           showHubView('hub-receiver-preview');
+          switchMobileTab('pane-transfer');
           ws.send(JSON.stringify({ type: 'join-session', sessionId: currentSessionId }));
         }
       };
@@ -1276,6 +1347,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           role = 'receiver';
           setAmbientState('connected', 'BEAM FROM ' + String(msg.senderName).toUpperCase());
           showHubView('hub-receiver-preview');
+          switchMobileTab('pane-transfer');
           ws.send(JSON.stringify({ type: 'join-session', sessionId: currentSessionId }));
         }
         else if (msg.type === 'code-found') {
@@ -1283,6 +1355,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
           role = 'receiver';
           setAmbientState('connected', 'CODE MATCHED');
           showHubView('hub-receiver-preview');
+          switchMobileTab('pane-transfer');
           ws.send(JSON.stringify({ type: 'join-session', sessionId: currentSessionId }));
         }
         else if (msg.type === 'session-info') {
@@ -1297,6 +1370,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         }
         else if (msg.type === 'start-transfer-now') {
           showHubView('hub-active-transfer');
+          switchMobileTab('pane-transfer');
           document.getElementById('back-to-qr-btn').classList.remove('hidden');
           startSenderTransfer(msg.receiverId);
         }
@@ -1345,6 +1419,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       }, 3500);
     }
 
+    // ------------------------------------------------------------
+    // 5. SONAR RADAR NODES & ONE-CLICK TAP-TO-SEND
+    // ------------------------------------------------------------
     function renderSonarRadarNodes(peerList) {
       const container = document.getElementById('radar-nodes-layer');
       const emptyHint = document.getElementById('radar-empty-hint');
@@ -1408,6 +1485,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       ws.send(JSON.stringify({ type: 'lookup-code', code: code }));
     }
 
+    // ------------------------------------------------------------
+    // 6. FILE SELECTION, FOLDER DRAG-DROP, CTRL+V & OPTIONAL .ZIP
+    // ------------------------------------------------------------
     function handleFilesPicked(fileList) {
       if (!fileList || fileList.length === 0) return;
       selectedFiles = Array.from(fileList);
@@ -1479,6 +1559,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
         const zip = new JSZip();
         selectedFiles.forEach(function(file) {
           const pathName = file.webkitRelativePath || file.name;
+          // Use STORE (no CPU compression bottleneck) for fast bundling & maximum streaming speed
           zip.file(pathName, file, { compression: 'STORE' });
         });
         const blob = await zip.generateAsync({ type: 'blob' });
@@ -1507,6 +1588,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       }
     }
 
+    // Ctrl+V Screenshot & Clipboard Paste Handler
     window.addEventListener('paste', function(e) {
       const activeTag = document.activeElement ? document.activeElement.tagName : '';
       if (activeTag === 'TEXTAREA' || activeTag === 'INPUT') return;
@@ -1516,6 +1598,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       }
     });
 
+    // Recursive Folder Drag-and-Drop Support
     const dropzoneEl = document.getElementById('bento-dropzone');
     if (dropzoneEl) {
       ['dragenter', 'dragover'].forEach(function(ev) {
@@ -1572,6 +1655,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       });
     }
 
+    // ------------------------------------------------------------
+    // 7. HYPER-STREAM ENGINE (ZERO-DELAY MAX SPEED P2P + TURBO RELAY)
+    // ------------------------------------------------------------
     function renderReceiverPreviewList() {
       if (!incomingFilesMeta || incomingFilesMeta.length === 0) return;
       const title = incomingFilesMeta.length === 1 ? incomingFilesMeta[0].name : (incomingFilesMeta.length + ' Files Ready to Download');
@@ -1597,6 +1683,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       rollingCrc = 0;
 
       showHubView('hub-active-transfer');
+      switchMobileTab('pane-transfer');
       document.getElementById('active-role-badge').innerText = 'RECEIVING MAX-SPEED';
       document.getElementById('integrity-badge').classList.add('hidden');
       setAmbientState('streaming', 'RECEIVING STREAM');
@@ -1718,6 +1805,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
       initPeerConnection(true, targetReceiverId);
 
+      // Fast 2.2s Fallback Watchdog so users on mobile data never wait long
       p2pWatchdog = setTimeout(function() {
         if (!isTransferring && (!dataChannel || dataChannel.readyState !== 'open')) {
           usingFallbackRelay = true;
@@ -1773,11 +1861,13 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       }
     }
 
+    // Unthrottled Continuous Buffer Pump (Zero setTimeout delay, saturates hardware pipe)
     async function pumpFileAtMaxThroughput(file, useRelay, onChunk) {
       const frameSize = useRelay ? RELAY_CHUNK_SIZE : WEBRTC_CHUNK_SIZE;
       let offset = 0;
 
       while (offset < file.size && !isAborted) {
+        // Respect backpressure only when hardware buffer hits 8MB ceiling
         if (!useRelay && dataChannel) {
           if (dataChannel.bufferedAmount > WEBRTC_HIGH_WATER_MARK) {
             await waitForDataChannelDrain();
@@ -1865,6 +1955,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       currentFileChunks = [];
     }
 
+    // ------------------------------------------------------------
+    // 8. 60FPS THROTTLED TELEMETRY HUD, CRC32 & AUDIO CHIME
+    // ------------------------------------------------------------
     function updateRollingCrcFast(arrayBuf) {
       const view = new Uint8Array(arrayBuf);
       const len = view.length;
@@ -1877,6 +1970,7 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
     function updateTelemetryAndProgress(doneBytes, totalBytes, forceRender) {
       if (totalBytes <= 0) return;
       const now = performance.now();
+      // Throttle DOM & Canvas repaints to ~16fps (every 60ms) so CPU stays 100% focused on network throughput
       if (!forceRender && (now - lastUiRenderTime < 60)) return;
       lastUiRenderTime = now;
 
@@ -1978,6 +2072,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       } catch (e) {}
     }
 
+    // ------------------------------------------------------------
+    // 9. STOP & RESTART AND BROADCAST QR RETURN
+    // ------------------------------------------------------------
     function triggerStopAndRestart() {
       isAborted = true;
       isTransferring = false;
@@ -2024,6 +2121,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
       });
     }
 
+    // ------------------------------------------------------------
+    // 10. P2P SCRATCHPAD, NATIVE SHARE & QR UTILITIES
+    // ------------------------------------------------------------
     function onScratchpadInput(textVal) {
       document.getElementById('scratchpad-char-count').innerText = textVal.length + ' chars';
       document.getElementById('scratchpad-sync-status').innerText = 'Broadcasting live...';
@@ -2152,6 +2252,9 @@ const HTML_DOCUMENT = `<!DOCTYPE html>
 
     initSignaling();
   </script>
+
+  <!-- Adsterra Social Bar Script (Placed right above closing body tag) -->
+  <script data-cfasync="false" src="https://bellnewyork.org/14/06cc9eb2138ff73474fdfb1a0281ed23"></script>
 </body>
 </html>`;
 
